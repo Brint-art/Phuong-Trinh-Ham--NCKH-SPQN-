@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hàm số — Nền tảng tự học phương trình hàm</title>
+  <meta name="description" content="Website tự học phương trình hàm: lý thuyết, ví dụ, bài tập, lời giải và hỏi AI.">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$']] },
+      options: { enableMenu: false }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-chtml.js"
+          integrity="sha384-AHAnt9ZhGeHIrydA1Kp1L7FN+2UosbF7RQg6C+9Is/a7kDpQ1684C2iH2VWil6r4"
+          crossorigin="anonymous" async></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="#home" class="brand" data-nav="home">
+        <span class="brand-logo">ƒ</span>
+        <span>Hàm số</span>
+      </a>
+      <nav class="main-nav">
+        <a href="#home" data-nav="home">Trang chủ</a>
+        <a href="#theory" data-nav="theory">Lý thuyết</a>
+        <a href="#exercises" data-nav="exercises">Bài tập</a>
+        <a href="#ai" data-nav="ai">AI tạo bài</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- ============ TRANG CHỦ ============ -->
+    <section id="page-home" class="page">
+      <div class="hero">
+        <h1>Hàm số</h1>
+        <p class="hero-sub">Nền tảng tự học phương trình hàm dành cho học sinh THPT khá giỏi và đội tuyển Olympic.</p>
+        <p class="hero-flow">Lộ trình học: <strong>Lý thuyết → Ví dụ → Bài tập → Lời giải → Hỏi AI</strong></p>
+        <div class="hero-actions">
+          <a href="#theory" class="btn btn-primary" data-nav="theory">Bắt đầu học</a>
+          <a href="#ai" class="btn btn-outline" data-nav="ai">AI tạo bộ bài tập</a>
+        </div>
+      </div>
+
+      <h2 class="section-title">Ba chuyên đề chính</h2>
+      <div id="home-topics" class="topic-cards"></div>
+
+      <h2 class="section-title">Vì sao nên học ở đây?</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>📘 Lý thuyết có tổ chức</h3>
+          <p>Định nghĩa, định lý, điều kiện áp dụng và kỹ thuật giải được trình bày theo lộ trình rõ ràng.</p>
+        </div>
+        <div class="feature-card">
+          <h3>📝 Tự luyện không chấm điểm</h3>
+          <p>Tự làm trên giấy, đối chiếu lời giải theo từng bước khi cần. Không thi, không áp lực.</p>
+        </div>
+        <div class="feature-card">
+          <h3>🤖 Hỏi AI từng bước giải</h3>
+          <p>Mỗi bước lời giải đều có thể hỏi AI: vì sao thay biến này, dùng định lý nào, có cách khác không.</p>
+        </div>
+        <div class="feature-card">
+          <h3>⚙️ AI tạo bộ bài luyện</h3>
+          <p>Chọn chuyên đề, kỹ thuật, độ khó và số lượng — AI tạo bộ bài tự luyện kèm gợi ý và lời giải.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ KHU LÝ THUYẾT ============ -->
+    <section id="page-theory" class="page hidden">
+      <h1 class="page-title">Khu lý thuyết</h1>
+      <p class="page-desc">Chọn chuyên đề và bài học. Mỗi bài học có liên kết đến nhóm bài tập tương ứng.</p>
+      <div id="theory-topic-tabs" class="topic-tabs"></div>
+      <div id="lesson-list" class="lesson-list"></div>
+      <div id="lesson-detail" class="lesson-detail hidden"></div>
+    </section>
+
+    <!-- ============ KHU BÀI TẬP ============ -->
+    <section id="page-exercises" class="page hidden">
+      <h1 class="page-title">Thư viện bài tập</h1>
+      <p class="page-desc">Lọc bài theo chuyên đề, kỹ thuật, mức độ, dạng bài và nguồn. Tự giải trước, đối chiếu lời giải sau.</p>
+
+      <div class="filters" id="exercise-filters">
+        <label>Chuyên đề
+          <select id="filter-topic"><option value="">Tất cả</option></select>
+        </label>
+        <label>Kỹ thuật
+          <select id="filter-technique"><option value="">Tất cả</option></select>
+        </label>
+        <label>Mức độ
+          <select id="filter-difficulty">
+            <option value="">Tất cả</option>
+            <option value="1">Cơ bản</option>
+            <option value="2">Vận dụng</option>
+            <option value="3">Nâng cao</option>
+          </select>
+        </label>
+        <label>Dạng bài
+          <select id="filter-type"><option value="">Tất cả</option></select>
+        </label>
+        <label>Nguồn
+          <select id="filter-source"><option value="">Tất cả</option></select>
+        </label>
+        <button id="filter-reset" class="btn btn-ghost">Xóa lọc</button>
+      </div>
+
+      <div id="exercise-list" class="exercise-list"></div>
+      <div id="exercise-detail" class="exercise-detail hidden"></div>
+    </section>
+
+    <!-- ============ AI TẠO BÀI ============ -->
+    <section id="page-ai" class="page hidden">
+      <h1 class="page-title">AI tạo bộ bài tập tự luyện</h1>
+      <p class="page-desc">AI tạo bộ bài tập để luyện (không phải bài kiểm tra). Bạn có thể xem, in hoặc lưu bộ bài.</p>
+
+      <form id="ai-form" class="ai-form">
+        <label>Chuyên đề
+          <select id="ai-topic" required></select>
+        </label>
+        <label>Kỹ thuật muốn luyện
+          <select id="ai-technique"><option value="">Tất cả kỹ thuật</option></select>
+        </label>
+        <label>Mức độ
+          <select id="ai-difficulty">
+            <option value="1">Cơ bản</option>
+            <option value="2" selected>Vận dụng</option>
+            <option value="3">Nâng cao</option>
+          </select>
+        </label>
+        <label>Số lượng bài
+          <input type="number" id="ai-count" min="1" max="10" value="3">
+        </label>
+        <button type="submit" class="btn btn-primary" id="ai-submit">Tạo bộ bài</button>
+      </form>
+
+      <div id="ai-status" class="ai-status"></div>
+      <div id="ai-result" class="ai-result hidden"></div>
+    </section>
+  </main>
+
+  <!-- Modal hỏi AI -->
+  <div id="ask-modal" class="modal hidden">
+    <div class="modal-box">
+      <button class="modal-close" id="ask-close" aria-label="Đóng">&times;</button>
+      <h3>Hỏi AI về bước giải</h3>
+      <p class="modal-question" id="ask-question-label"></p>
+      <div id="ask-answers" class="ask-answers"></div>
+      <form id="ask-form">
+        <input type="hidden" id="ask-exercise">
+        <input type="hidden" id="ask-step">
+        <input type="text" id="ask-input" placeholder="Ví dụ: Vì sao cần thay x = 0?" required>
+        <button type="submit" class="btn btn-primary">Gửi câu hỏi</button>
+      </form>
+      <div id="ask-result" class="ask-result"></div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>Hàm số — Nền tảng tự học phương trình hàm · Không thi trực tuyến, không chấm điểm.</p>
+      <p>Nội dung AI chỉ mang tính tham khảo, nên được giáo viên/chuyên gia kiểm duyệt.</p>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
