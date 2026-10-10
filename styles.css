@@ -29,7 +29,16 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.65;
+  /* Footer dính đáy: khi nội dung ngắn vẫn còn khoảng trống bên dưới,
+     không bị "nhảy" lên giữa màn hình. 100dvh để theo chiều cao thật
+     của trình duyệt trên điện thoại (thanh địa chỉ co giãn). */
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
 }
+
+main { flex: 1 0 auto; }
 
 .container { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
 
@@ -492,6 +501,148 @@ select:focus, input:focus { outline: 2px solid var(--primary-soft); border-color
   white-space: pre-wrap;
 }
 
+/* ---------- Tài khoản & vai trò (Giai đoạn 4) ---------- */
+.auth-box { display: flex; align-items: center; gap: 10px; }
+
+.auth-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--primary-soft);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.88rem;
+}
+
+.auth-name { font-weight: 600; color: var(--primary-dark); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.auth-anon { color: var(--text-muted); font-size: 0.85rem; }
+
+.btn-sm { padding: 6px 13px; font-size: 0.86rem; }
+.btn-danger { color: var(--danger); border-color: #f0c8c3; }
+.btn-danger:hover { color: var(--danger); border-color: var(--danger); }
+
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.modal-sm { max-width: 420px; }
+
+.auth-tabs { margin: 12px 0 6px; }
+
+.auth-form { display: grid; gap: 12px; }
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.auth-msg { margin-top: 12px; font-size: 0.9rem; min-height: 1.2em; }
+.auth-ok { color: var(--accent); font-weight: 600; }
+.auth-hint { color: var(--text-muted); font-size: 0.82rem; margin: 14px 0 0; }
+
+/* ---------- Trang quản trị ---------- */
+.admin-notice {
+  background: #fff8e7;
+  border: 1px solid #f0dfae;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.admin-notice:empty { display: none; }
+
+.count-chip {
+  display: inline-block;
+  min-width: 26px;
+  text-align: center;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  padding: 1px 8px;
+  vertical-align: middle;
+}
+
+.admin-queue, .admin-lessons, .admin-users, .admin-logs { display: grid; gap: 12px; }
+
+.admin-sub { margin: 22px 0 10px; font-size: 1.08rem; }
+
+.queue-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.queue-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.queue-head strong { font-size: 1.02rem; }
+.queue-problem { margin: 0 0 10px; }
+.queue-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.queue-msg { margin: 8px 0 0; font-size: 0.88rem; min-height: 1.1em; }
+
+.row-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.row-title { flex: 1; min-width: 180px; font-weight: 600; font-size: 0.94rem; }
+.row-msg { font-size: 0.85rem; }
+.user-mail { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; font-style: normal; }
+
+.role-select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-family: var(--font);
+  background: #fff;
+  width: auto;
+}
+
+.faq-answer {
+  flex: 2;
+  min-width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-family: var(--font);
+}
+
+/* ---------- Bộ bài của tôi ---------- */
+.my-sets { display: grid; gap: 8px; margin-top: 28px; }
+
+.my-set {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 14px;
+}
+
+.my-set-title { flex: 1; min-width: 160px; font-weight: 600; font-size: 0.94rem; }
+.my-set-time { color: var(--text-muted); font-size: 0.82rem; }
+
 /* ---------- Footer ---------- */
 .site-footer {
   border-top: 1px solid var(--border);
@@ -500,6 +651,7 @@ select:focus, input:focus { outline: 2px solid var(--primary-soft); border-color
   font-size: 0.88rem;
   text-align: center;
   padding: 20px 0;
+  flex-shrink: 0;
 }
 
 .site-footer p { margin: 4px 0; }
@@ -507,6 +659,7 @@ select:focus, input:focus { outline: 2px solid var(--primary-soft); border-color
 /* ---------- Responsive ---------- */
 @media (max-width: 720px) {
   .header-inner { flex-direction: column; height: auto; padding: 10px 0; }
+  .auth-box { justify-content: center; }
   .main-nav { justify-content: center; }
   .main-nav a { padding: 6px 10px; font-size: 0.9rem; }
   .filters, .ai-form { flex-direction: column; align-items: stretch; }
@@ -521,3 +674,26 @@ select:focus, input:focus { outline: 2px solid var(--primary-soft); border-color
   body { background: #fff; }
   .solution-steps { display: block !important; }
 }
+
+/* ---------- Qu?n tr? ---------- */
+.admin-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); }
+.admin-form label { display: block; margin-bottom: 16px; font-weight: 500; }
+.admin-form input[type='text'], .admin-form select, .admin-form textarea { width: 100%; padding: 12px; margin-top: 6px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 1rem; }
+.admin-form .form-row { display: flex; gap: 16px; margin-bottom: 16px; }
+.admin-form .form-row label { flex: 1; margin-bottom: 0; }
+.admin-list-container { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
+
+/* ---------- Hybrid AI Chatbox ---------- */
+.chat-sidebar { position: fixed; top: 0; right: 0; width: 350px; height: 100vh; background: var(--surface); box-shadow: -2px 0 10px rgba(0,0,0,0.1); z-index: 100; display: flex; flex-direction: column; transform: translateX(0); transition: transform 0.3s ease; }
+.chat-sidebar.hidden { transform: translateX(100%); display: flex !important; }
+.chat-header { padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.chat-header h3 { margin: 0; font-size: 1.1rem; }
+.chat-body { flex: 1; padding: 20px; overflow-y: auto; background: var(--bg); display: flex; flex-direction: column; gap: 10px; }
+.chat-msg { max-width: 85%; padding: 10px 15px; border-radius: 10px; font-size: 0.95rem; }
+.chat-msg.user { align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 2px; }
+.chat-msg.ai { align-self: flex-start; background: white; border: 1px solid var(--border); border-bottom-left-radius: 2px; }
+.chat-footer { padding: 15px; border-top: 1px solid var(--border); background: var(--surface); }
+#chat-form { display: flex; gap: 10px; }
+#chat-input { flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 20px; outline: none; }
+.ask-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-soft); color: var(--primary); font-size: 12px; margin-left: 8px; cursor: pointer; vertical-align: middle; }
+.ask-icon:hover { background: var(--primary); color: white; }

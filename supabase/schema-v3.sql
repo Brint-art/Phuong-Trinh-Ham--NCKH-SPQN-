@@ -1,17 +1,79 @@
 -- ============================================================
--- Hàm số — Schema Supabase (Giai đoạn 3)
+-- Hàm số — Schema Supabase (Giai đoạn 3 - Gộp V2 & V3 + Dọn Dẹp)
 -- Cập nhật cấu trúc:
+--   - Bỏ qua các bảng cũ: ai_generation_requests, solution_questions, exercise_solutions
+--   - Tạo bảng profiles và trigger tự tạo user
 --   - Lý thuyết: 3 khung (bổ trợ, nền tảng, bài tập đặc trưng)
 --   - Bài tập: 2 khung (đề bài, đáp án chi tiết), chuyển từ bảng phụ sang trường dữ liệu trực tiếp.
 --   - AI Library: Lưu bài tập do AI sinh ra theo user.
 -- ============================================================
 
--- 1. Bảng `lessons`: Thêm 3 cột khung mới
-ALTER TABLE lessons ADD COLUMN IF NOT EXISTS supplementary_knowledge TEXT DEFAULT '';
-ALTER TABLE lessons ADD COLUMN IF NOT EXISTS foundational_knowledge TEXT DEFAULT '';
-ALTER TABLE lessons ADD COLUMN IF NOT EXISTS characteristic_exercises TEXT DEFAULT '';
+set search_path = public;
 
--- Di chuyển dữ liệu từ `sections` JSON sang 3 cột mới (nếu chưa migrate)
+-- ============================================================
+-- A. DỌN DẸP BẢN CŨ
+-- ============================================================
+DROP TABLE IF EXISTS public.ai_generation_requests CASCADE;
+DROP TABLE IF EXISTS public.solution_questions CASCADE;
+DROP TABLE IF EXISTS public.exercise_solutions CASCADE;
+ALTER TABLE IF EXISTS public.exercises DROP COLUMN IF EXISTS status;
+-- Không xóa type enum exercise_status vì PostgreSQL không cho xóa dễ dàng nếu đang bị reference ở đâu đó, 
+-- nhưng ta đã bỏ cột status.
+
+-- ============================================================
+-- B. TÀI KHOẢN VÀ QUYỀN (PROFILES & ADMIN)
+-- ============================================================
+
+DO $$ BEGIN
+    CREATE TYPE public.user_role AS ENUM ('student', 'admin');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+  full_name TEXT,
+  role public.user_role DEFAULT 'student',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.app_role() RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT coalesce((SELECT p.role::text FROM public.profiles p WHERE p.id = auth.uid()), 'anon')
+$$;
+
+CREATE OR REPLACE FUNCTION public.app_is_admin() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT public.app_role() = 'admin'
+$$;
+
+GRANT EXECUTE ON FUNCTION public.app_role(), public.app_is_admin() TO anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name, role)
+  VALUES (
+    new.id,
+    coalesce(nullif(new.raw_user_meta_data ->> 'full_name', ''), split_part(new.email, '@', 1)),
+    'student'
+  )
+  ON CONFLICT (id) DO UPDATE SET full_name = coalesce(nullif(EXCLUDED.full_name, ''), profiles.full_name);
+  RETURN new;
+END $$;
+
+DROP TRIGGER IF EXISTS hamso_handle_new_user ON auth.users;
+CREATE TRIGGER hamso_handle_new_user
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ============================================================
+-- C. CẤU TRÚC HỌC LIỆU (LESSONS & EXERCISES)
+-- ============================================================
+
+-- 1. Bảng `lessons`: Thêm 3 cột khung mới
 DO $$
 DECLARE
     lesson_record RECORD;

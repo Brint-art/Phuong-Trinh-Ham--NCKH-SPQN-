@@ -27,9 +27,8 @@ function loadEnv(file) {
 loadEnv(path.join(ROOT, '.env.local'));
 loadEnv(path.join(ROOT, '.env'));
 
-/* ---------- Nạp hai hàm API (đúng kiểu Vercel: handler(req, res)) ---------- */
 const apiHandlers = {};
-for (const name of ['generate-exercises', 'ask-solution']) {
+for (const name of ['generate-exercises', 'ask-solution', 'generate-similar']) {
   const file = path.join(ROOT, 'api', name + '.js');
   if (fs.existsSync(file)) apiHandlers['/api/' + name] = require(file);
 }

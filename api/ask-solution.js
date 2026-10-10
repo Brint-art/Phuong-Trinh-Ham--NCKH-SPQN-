@@ -8,24 +8,7 @@ const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'ministral-14b-latest';
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
 
-const { checkRateLimit, applyCors } = require('./_lib');
-
-/* Đọc body JSON tương thích mọi môi trường:
-   - Vercel: req.body đã được parse sẵn thành object.
-   - server.js local: req.body là chuỗi thô.
-   - Runtime chưa parse: tự đọc stream của req. */
-async function readJsonBody(req) {
-  if (req.body && typeof req.body === 'object') return req.body;
-  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body);
-  const raw = await new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', c => { data += c; if (data.length > 1e6) req.destroy(); });
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
-  });
-  if (!raw.trim()) throw new Error('empty body');
-  return JSON.parse(raw);
-}
+const { checkRateLimit, applyCors, readJsonBody } = require('./_lib');
 
 module.exports = async function handler(req, res) {
   if (applyCors(req, res)) return;

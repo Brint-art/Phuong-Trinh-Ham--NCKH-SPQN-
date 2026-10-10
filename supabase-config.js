@@ -8,11 +8,8 @@
    ============================================================ */
 
 window.SUPABASE_CONFIG = {
-  url: 'https://xgcocacjtsrsvhbguofa.supabase.co',
-  anonKey: 'sb_publishable_ko42b9i0DtdpDAmp2MK2zw_wK6OluJa', // publishable key (dạng mới) — dùng như anon key
-  useStaticFallback: true,  // true: dùng tạm data.js cho phần Supabase chưa có dữ liệu.
-                             // Supabase chỉ "kích hoạt" khi đã có ít nhất 1 bài học hoặc bài tập.
-
+  url: 'https://uywpxiqchksbwbfdbqnd.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV5d3B4aXFjaGtzYndiZmRicW5kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4MzY0MzcsImV4cCI6MjEwNjQxMjQzN30.HXugCDeJI5BJNPmODAqDo9vvaQGXebcxl1UgqQ45KSM',
   // Khi chạy website bằng server tĩnh (Sublime Server, Live Server...)
   // thì AI không thể chạy trên server đó. Nếu đã deploy trang lên Vercel,
   // điền URL bản deploy vào đây để các nút AI gọi về API của bản deploy:

@@ -67,10 +67,20 @@ async function callAiApi(apiPath, payload) {
     throw new Error('Bạn đã tạo bài quá nhiều. Vui lòng thử lại sau 1 giờ.');
   }
 
+  const headers = { 'Content-Type': 'application/json' };
+  
+  const client = sb();
+  if (client) {
+    const { data } = await client.auth.getSession();
+    if (data && data.session && data.session.access_token) {
+      headers['Authorization'] = `Bearer ${data.session.access_token}`;
+    }
+  }
+
   try {
     const res = await fetch(apiUrl(apiPath), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
     });
     const data = await res.json();
@@ -88,21 +98,36 @@ async function callAiApi(apiPath, payload) {
 /* ---------- Load Data ---------- */
 async function loadData() {
   const client = sb();
-  if (!client) return;
+  if (!client) {
+    const msg = 'Chưa cấu hình Supabase hoặc thiếu thư viện. Vui lòng kiểm tra supabase-config.js.';
+    console.error(msg);
+    if ($('#home-topics')) $('#home-topics').innerHTML = `<p style="color:red; text-align:center; padding: 2rem;">${msg}</p>`;
+    return;
+  }
 
-  const [tRes, lRes, eRes] = await Promise.all([
-    client.from('topics').select('*').order('display_order'),
-    client.from('lessons').select('*').order('display_order'),
-    client.from('exercises').select('*').order('display_order')
-  ]);
+  try {
+    const [tRes, lRes, eRes] = await Promise.all([
+      client.from('topics').select('*').order('display_order'),
+      client.from('lessons').select('*').order('display_order'),
+      client.from('exercises').select('*').order('display_order')
+    ]);
 
-  if (tRes.data) TOPICS = tRes.data;
-  if (lRes.data) LESSONS = lRes.data;
-  if (eRes.data) EXERCISES = eRes.data;
+    if (tRes.error) throw tRes.error;
+    if (lRes.error) throw lRes.error;
+    if (eRes.error) throw eRes.error;
 
-  if (currentUser) {
-    const libRes = await client.from('ai_library').select('*').eq('user_id', currentUser.id);
-    if (libRes.data) AI_LIBRARY = libRes.data;
+    TOPICS = tRes.data || [];
+    LESSONS = lRes.data || [];
+    EXERCISES = eRes.data || [];
+
+    if (currentUser) {
+      const libRes = await client.from('ai_library').select('*').eq('user_id', currentUser.id);
+      if (libRes.data) AI_LIBRARY = libRes.data;
+    }
+  } catch (err) {
+    const msg = 'Lỗi tải dữ liệu Supabase: ' + (err.message || 'Không xác định');
+    console.error(err);
+    if ($('#home-topics')) $('#home-topics').innerHTML = `<p style="color:red; text-align:center; padding: 2rem;">${msg}</p>`;
   }
 }
 
@@ -442,24 +467,14 @@ async function openAskModal(lineText, problem, stepsStr, indexStr) {
   $('#ask-modal').classList.remove('hidden');
   
   try {
-    const res = await fetch(`${window.SUPABASE_CONFIG?.apiBase || ''}/api/ask-solution`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        problem: currentAiContext.problem,
-        solutionSteps: currentAiContext.solutionSteps,
-        stepIndex: currentAiContext.stepIndex,
-        question: "Giải thích ngắn gọn bước này giúp tôi."
-      })
+    const data = await callAiApi('/api/ask-solution', {
+      problem: currentAiContext.problem,
+      solutionSteps: currentAiContext.solutionSteps,
+      stepIndex: currentAiContext.stepIndex,
+      question: "Giải thích ngắn gọn bước này giúp tôi."
     });
     
-    if (!res.ok) {
-      let errText = "Lỗi mạng";
-      try { const errObj = await res.json(); errText = errObj.error || errText; } catch(e) {}
-      throw new Error(errText);
-    }
-    
-    const data = await res.json();
+    const dataObj = typeof data === 'string' ? JSON.parse(data) : data;
     $('#ask-quick-explanation').innerHTML = `<strong>Giải thích nhanh:</strong> ${toHtml(data.answer)}`;
   } catch (err) {
     $('#ask-quick-explanation').innerHTML = `<span style="color:red">Lỗi: ${escapeHtml(err.message)}</span>`;
@@ -504,24 +519,14 @@ $('#chat-form')?.addEventListener('submit', async (e) => {
   chatBody.scrollTop = chatBody.scrollHeight;
 
   try {
-    const res = await fetch(`${window.SUPABASE_CONFIG?.apiBase || ''}/api/ask-solution`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        problem: currentAiContext.problem,
-        solutionSteps: currentAiContext.solutionSteps,
-        stepIndex: currentAiContext.stepIndex,
-        question: text
-      })
+    const data = await callAiApi('/api/ask-solution', {
+      problem: currentAiContext.problem,
+      solutionSteps: currentAiContext.solutionSteps,
+      stepIndex: currentAiContext.stepIndex,
+      question: text
     });
     
-    if (!res.ok) {
-      let errText = "Lỗi mạng";
-      try { const errObj = await res.json(); errText = errObj.error || errText; } catch(e) {}
-      throw new Error(errText);
-    }
-    
-    const data = await res.json();
+    const dataObj = typeof data === 'string' ? JSON.parse(data) : data;
     const typingIndicator = document.getElementById(typingId);
     if (typingIndicator) typingIndicator.remove();
     chatBody.innerHTML += `<div class="chat-msg ai">${toHtml(data.answer)}</div>`;
