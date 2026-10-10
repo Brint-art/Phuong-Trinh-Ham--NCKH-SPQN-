@@ -311,10 +311,10 @@ function renderExerciseDetail(id) {
   
   // Xử lý chèn nút 💡 vào từng dòng đáp án
   const solutionLines = (e.detailed_solution || '').split('\n').map(line => line.trim()).filter(Boolean);
-  const solutionHtml = solutionLines.map(line => `
+  const solutionHtml = solutionLines.map((line, index) => `
     <p class="solution-line">
       ${escapeHtml(line)}
-      <span class="ask-icon" title="Hỏi AI bước này" data-line="${escapeHtml(line)}" data-full="${escapeHtml(e.question + '\n' + e.detailed_solution)}">💡</span>
+      <span class="ask-icon" title="Hỏi AI bước này" data-line="${escapeHtml(line)}" data-problem="${escapeHtml(e.question)}" data-steps="${escapeHtml(JSON.stringify(solutionLines))}" data-index="${index}">💡</span>
     </p>
   `).join('');
 
@@ -405,7 +405,13 @@ function renderExerciseDetail(id) {
   // Gắn event cho Nút Hỏi AI
   $$('.ask-icon', box).forEach(icon => {
     icon.addEventListener('click', (ev) => {
-      openAskModal(ev.target.dataset.line, ev.target.dataset.full);
+      const target = ev.target;
+      openAskModal(
+        target.dataset.line,
+        target.dataset.problem,
+        target.dataset.steps,
+        target.dataset.index
+      );
     });
   });
 
@@ -415,16 +421,39 @@ function renderExerciseDetail(id) {
 /* ---------- Hybrid AI Logic ---------- */
 let currentAiContext = null;
 
-function openAskModal(lineText, fullContext) {
-  currentAiContext = { line: lineText, full: fullContext };
+async function openAskModal(lineText, problem, stepsStr, indexStr) {
+  currentAiContext = { 
+    line: lineText, 
+    problem: problem,
+    solutionSteps: JSON.parse(stepsStr || '[]'),
+    stepIndex: parseInt(indexStr || '0')
+  };
   $('#ask-quick-explanation').innerHTML = "<em>Đang hỏi Gia sư AI...</em>";
   $('#ask-modal').classList.remove('hidden');
   
-  // Fake call AI API for quick explanation
-  // TODO: Call real API here
-  setTimeout(() => {
-    $('#ask-quick-explanation').innerHTML = "<strong>Giải thích nhanh:</strong> Bước này áp dụng định lý cơ bản để khử biến số. Việc đặt x=0 giúp loại bỏ các ẩn phụ không cần thiết.";
-  }, 1000);
+  try {
+    const res = await fetch(`${window.SUPABASE_CONFIG?.apiBase || ''}/api/ask-solution`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        problem: currentAiContext.problem,
+        solutionSteps: currentAiContext.solutionSteps,
+        stepIndex: currentAiContext.stepIndex,
+        question: "Giải thích ngắn gọn bước này giúp tôi."
+      })
+    });
+    
+    if (!res.ok) {
+      let errText = "Lỗi mạng";
+      try { const errObj = await res.json(); errText = errObj.error || errText; } catch(e) {}
+      throw new Error(errText);
+    }
+    
+    const data = await res.json();
+    $('#ask-quick-explanation').innerHTML = `<strong>Giải thích nhanh:</strong> ${toHtml(data.answer)}`;
+  } catch (err) {
+    $('#ask-quick-explanation').innerHTML = `<span style="color:red">Lỗi: ${escapeHtml(err.message)}</span>`;
+  }
 }
 
 $('#ask-close')?.addEventListener('click', () => {
@@ -449,7 +478,7 @@ $('#generate-close')?.addEventListener('click', () => {
   $('#generate-modal').classList.add('hidden');
 });
 
-$('#chat-form')?.addEventListener('submit', (e) => {
+$('#chat-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const input = $('#chat-input');
   const text = input.value.trim();
@@ -460,15 +489,38 @@ $('#chat-form')?.addEventListener('submit', (e) => {
   input.value = '';
   
   // Tạm hiển thị AI đang nghĩ
-  chatBody.innerHTML += `<div class="chat-msg ai" id="ai-typing"><em>Đang suy nghĩ...</em></div>`;
+  const typingId = 'ai-typing-' + Date.now();
+  chatBody.innerHTML += `<div class="chat-msg ai" id="${typingId}"><em>Đang suy nghĩ...</em></div>`;
   chatBody.scrollTop = chatBody.scrollHeight;
 
-  // Fake call
-  setTimeout(() => {
-    $('#ai-typing').remove();
-    chatBody.innerHTML += `<div class="chat-msg ai">Do chúng ta đã giả sử hàm liên tục, nên khi triệt tiêu y, ta sẽ có được phương trình hằng số. Đó là lý do dấu âm bị triệt tiêu!</div>`;
-    chatBody.scrollTop = chatBody.scrollHeight;
-  }, 1500);
+  try {
+    const res = await fetch(`${window.SUPABASE_CONFIG?.apiBase || ''}/api/ask-solution`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        problem: currentAiContext.problem,
+        solutionSteps: currentAiContext.solutionSteps,
+        stepIndex: currentAiContext.stepIndex,
+        question: text
+      })
+    });
+    
+    if (!res.ok) {
+      let errText = "Lỗi mạng";
+      try { const errObj = await res.json(); errText = errObj.error || errText; } catch(e) {}
+      throw new Error(errText);
+    }
+    
+    const data = await res.json();
+    const typingIndicator = document.getElementById(typingId);
+    if (typingIndicator) typingIndicator.remove();
+    chatBody.innerHTML += `<div class="chat-msg ai">${toHtml(data.answer)}</div>`;
+  } catch (err) {
+    const typingIndicator = document.getElementById(typingId);
+    if (typingIndicator) typingIndicator.remove();
+    chatBody.innerHTML += `<div class="chat-msg ai" style="color:red">Lỗi: ${escapeHtml(err.message)}</div>`;
+  }
+  chatBody.scrollTop = chatBody.scrollHeight;
 });
 
 
