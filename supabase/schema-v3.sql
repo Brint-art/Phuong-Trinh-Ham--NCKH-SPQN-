@@ -90,6 +90,8 @@ ALTER TABLE exercises ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT fals
 ALTER TABLE lessons ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;
 
 -- Bỏ NOT NULL cho title và problem_latex để admin thêm dễ dàng qua form mới
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS problem_latex TEXT;
 ALTER TABLE exercises ALTER COLUMN title DROP NOT NULL;
 ALTER TABLE exercises ALTER COLUMN problem_latex DROP NOT NULL;
 
