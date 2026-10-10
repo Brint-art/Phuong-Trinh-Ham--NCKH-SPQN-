@@ -50,6 +50,17 @@ function apiUrl(apiPath) {
 }
 
 async function callAiApi(apiPath, payload) {
+  const limit = 5;
+  const windowMs = 60 * 60 * 1000;
+  
+  let logs = JSON.parse(localStorage.getItem('ai_request_logs') || '[]');
+  const now = Date.now();
+  logs = logs.filter(t => now - t <= windowMs);
+  
+  if (logs.length >= limit) {
+    throw new Error('Bạn đã tạo bài quá nhiều. Vui lòng thử lại sau 1 giờ.');
+  }
+
   try {
     const res = await fetch(apiUrl(apiPath), {
       method: 'POST',
@@ -58,9 +69,13 @@ async function callAiApi(apiPath, payload) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Lỗi server');
+    
+    logs.push(now);
+    localStorage.setItem('ai_request_logs', JSON.stringify(logs));
+    
     return data;
   } catch (err) {
-    throw new Error('Lỗi gọi AI: ' + err.message);
+    throw err;
   }
 }
 
