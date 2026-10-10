@@ -119,8 +119,12 @@
               <input type="checkbox" id="admin-lesson-published"> Xuất bản bài học này
             </label>
             
-            <button type="submit" class="btn btn-primary">Lưu Bài học</button>
-            <button type="button" class="btn btn-outline" id="admin-lesson-clear">Tạo mới</button>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+              <button type="submit" class="btn btn-primary">Lưu Bài học</button>
+              <button type="button" class="btn btn-outline" id="admin-lesson-clear">Tạo mới</button>
+              <button type="button" class="btn btn-outline" id="admin-lesson-preview">Xem trước</button>
+            </div>
+            <div id="admin-lesson-preview-box" class="preview-box hidden" style="margin-top: 15px; padding: 15px; border: 1px dashed #ccc;"></div>
           </form>
           <div id="admin-lessons-list" class="admin-list-container"></div>
         </div>
@@ -149,8 +153,12 @@
               <input type="checkbox" id="admin-exercise-published"> Xuất bản bài tập này
             </label>
             
-            <button type="submit" class="btn btn-primary">Lưu Bài tập</button>
-            <button type="button" class="btn btn-outline" id="admin-exercise-clear">Tạo mới</button>
+            <div style="display:flex; gap:10px; margin-top:10px;">
+              <button type="submit" class="btn btn-primary">Lưu Bài tập</button>
+              <button type="button" class="btn btn-outline" id="admin-exercise-clear">Tạo mới</button>
+              <button type="button" class="btn btn-outline" id="admin-exercise-preview">Xem trước</button>
+            </div>
+            <div id="admin-exercise-preview-box" class="preview-box hidden" style="margin-top: 15px; padding: 15px; border: 1px dashed #ccc;"></div>
           </form>
           <div id="admin-exercises-list" class="admin-list-container"></div>
         </div>

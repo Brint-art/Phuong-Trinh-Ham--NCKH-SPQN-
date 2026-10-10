@@ -657,6 +657,45 @@ $('#admin-exercise-clear')?.addEventListener('click', () => {
   $('#admin-exercise-published').checked = false;
 });
 
+$('#admin-lesson-title')?.addEventListener('input', (e) => {
+  const slugInput = $('#admin-lesson-slug');
+  if (!slugInput.value || slugInput.dataset.auto === 'true') {
+    const slug = e.target.value.toLowerCase().trim().replace(/đ/g, 'd').replace(/[\s\W-]+/g, '-').replace(/^-+|-+$/g, '');
+    slugInput.value = slug;
+    slugInput.dataset.auto = 'true';
+  }
+});
+
+$('#admin-lesson-slug')?.addEventListener('input', (e) => {
+  e.target.dataset.auto = 'false';
+});
+
+$('#admin-lesson-preview')?.addEventListener('click', () => {
+  const box = $('#admin-lesson-preview-box');
+  box.innerHTML = `
+    <h4>1. Kiến thức bổ trợ</h4>
+    ${toHtml($('#admin-lesson-supplementary').value)}
+    <h4>2. Kiến thức nền tảng</h4>
+    ${toHtml($('#admin-lesson-foundational').value)}
+    <h4>3. Bài tập đặc trưng</h4>
+    ${toHtml($('#admin-lesson-characteristic').value)}
+  `;
+  box.classList.remove('hidden');
+  typeset(box);
+});
+
+$('#admin-exercise-preview')?.addEventListener('click', () => {
+  const box = $('#admin-exercise-preview-box');
+  box.innerHTML = `
+    <h4>Đề bài</h4>
+    ${toHtml($('#admin-exercise-question').value)}
+    <h4>Đáp án chi tiết</h4>
+    ${toHtml($('#admin-exercise-solution').value)}
+  `;
+  box.classList.remove('hidden');
+  typeset(box);
+});
+
 $('#admin-lesson-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = $('#admin-lesson-id').value;
