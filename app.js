@@ -370,6 +370,16 @@ function renderExerciseDetail(id) {
           <h4 style="margin-bottom:10px;">Đáp án chi tiết</h4>
           ${toHtml(data.detailed_solution)}
         </div>
+        ${data.nghiem_cuoi && data.nghiem_cuoi !== "Không xác định" ? `
+        <div class="exercise-block" style="margin-top: 20px;">
+          <h4 style="margin-bottom:10px; color: var(--primary-color);">Đáp số (Nghiệm cuối)</h4>
+          ${toHtml(data.nghiem_cuoi)}
+        </div>` : ''}
+        ${data.thay_doi && data.thay_doi !== "Không xác định" ? `
+        <div class="exercise-block" style="margin-top: 20px;">
+          <h4 style="margin-bottom:10px; color: var(--secondary-color);">Phân tích thay đổi so với bài gốc</h4>
+          ${toHtml(data.thay_doi)}
+        </div>` : ''}
       `;
       $('#generate-modal').classList.remove('hidden');
       $('#save-library-ai').classList.remove('hidden');
