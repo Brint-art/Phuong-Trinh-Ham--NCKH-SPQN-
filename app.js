@@ -475,7 +475,8 @@ async function openAskModal(lineText, problem, stepsStr, indexStr) {
     });
     
     const dataObj = typeof data === 'string' ? JSON.parse(data) : data;
-    $('#ask-quick-explanation').innerHTML = `<strong>Giải thích nhanh:</strong> ${toHtml(data.answer)}`;
+    $('#ask-quick-explanation').innerHTML = `<strong>Giải thích nhanh:</strong> ${toHtml(dataObj.answer || data.answer)}`;
+    typeset($('#ask-quick-explanation'));
   } catch (err) {
     $('#ask-quick-explanation').innerHTML = `<span style="color:red">Lỗi: ${escapeHtml(err.message)}</span>`;
   }
@@ -529,7 +530,8 @@ $('#chat-form')?.addEventListener('submit', async (e) => {
     const dataObj = typeof data === 'string' ? JSON.parse(data) : data;
     const typingIndicator = document.getElementById(typingId);
     if (typingIndicator) typingIndicator.remove();
-    chatBody.innerHTML += `<div class="chat-msg ai">${toHtml(data.answer)}</div>`;
+    chatBody.innerHTML += `<div class="chat-msg ai">${toHtml(dataObj.answer || data.answer)}</div>`;
+    typeset(chatBody);
   } catch (err) {
     const typingIndicator = document.getElementById(typingId);
     if (typingIndicator) typingIndicator.remove();
