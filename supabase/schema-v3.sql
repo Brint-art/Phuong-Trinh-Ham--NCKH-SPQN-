@@ -50,7 +50,14 @@ ALTER TABLE exercises ADD COLUMN IF NOT EXISTS question TEXT DEFAULT '';
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS detailed_solution TEXT DEFAULT '';
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS display_order INT DEFAULT 0;
-ALTER TABLE exercises ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT true;
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;
+
+-- Cột is_published cho lessons
+ALTER TABLE lessons ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;
+
+-- Bỏ NOT NULL cho title và problem_latex để admin thêm dễ dàng qua form mới
+ALTER TABLE exercises ALTER COLUMN title DROP NOT NULL;
+ALTER TABLE exercises ALTER COLUMN problem_latex DROP NOT NULL;
 
 -- Di chuyển dữ liệu từ `problem_latex` sang `question`
 UPDATE exercises SET question = problem_latex WHERE question = '' AND problem_latex IS NOT NULL;
@@ -76,14 +83,7 @@ BEGIN
     END LOOP;
 END $$;
 
--- 3. Tạo bảng `profiles` nếu chưa có (dành cho RLS role)
-CREATE TABLE IF NOT EXISTS profiles (
-  id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-  role TEXT DEFAULT 'user'
-);
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Users can read own profile" ON profiles;
-CREATE POLICY "Users can read own profile" ON profiles FOR SELECT USING (auth.uid() = id);
+-- 3. Bảng `profiles` đã được tạo trong schema-v2-roles.sql nên bỏ qua ở đây.
 
 -- 4. Bảng `ai_library` (Lưu trữ bài do AI sinh)
 CREATE TABLE IF NOT EXISTS ai_library (
@@ -105,26 +105,27 @@ CREATE POLICY "Users can manage their own ai_library" ON ai_library
   WITH CHECK (auth.uid() = user_id);
 
 -- 5. RLS cho Admin (Insert/Update/Delete)
--- Hàm tiện ích kiểm tra admin
-CREATE OR REPLACE FUNCTION public.is_admin() RETURNS BOOLEAN AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM profiles
-    WHERE id = auth.uid() AND role = 'admin'
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+-- Đã có hàm app_is_admin() từ schema-v2-roles.sql nên không tạo lại is_admin() ở đây.
 
 -- Quyền cho admin trên bảng lessons
 DROP POLICY IF EXISTS "Admin can manage lessons" ON lessons;
 CREATE POLICY "Admin can manage lessons" ON lessons
   FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (app_is_admin())
+  WITH CHECK (app_is_admin());
 
 -- Quyền cho admin trên bảng exercises
 DROP POLICY IF EXISTS "Admin can manage exercises" ON exercises;
 CREATE POLICY "Admin can manage exercises" ON exercises
   FOR ALL TO authenticated
-  USING (is_admin())
-  WITH CHECK (is_admin());
+  USING (app_is_admin())
+  WITH CHECK (app_is_admin());
+
+-- Sửa RLS cho học sinh chỉ đọc bài đã xuất bản
+DROP POLICY IF EXISTS "lesson_read" ON lessons;
+CREATE POLICY "lesson_read" ON lessons FOR SELECT TO anon, authenticated
+  USING (is_published = true OR app_is_admin());
+
+DROP POLICY IF EXISTS "exercise_read" ON exercises;
+CREATE POLICY "exercise_read" ON exercises FOR SELECT TO anon, authenticated
+  USING (is_published = true OR app_is_admin());
