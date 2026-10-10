@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
+-- Cho phép user tự đọc profile của mình
+DROP POLICY IF EXISTS "Users can read own profile" ON public.profiles;
+CREATE POLICY "Users can read own profile" ON public.profiles
+  FOR SELECT USING (auth.uid() = id);
+
+-- Đảm bảo tất cả user cũ đều có profile
+INSERT INTO public.profiles (id, full_name, role)
+SELECT id, email, 'student' FROM auth.users
+ON CONFLICT (id) DO NOTHING;
+
 CREATE OR REPLACE FUNCTION public.app_role() RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT coalesce((SELECT p.role::text FROM public.profiles p WHERE p.id = auth.uid()), 'anon')
