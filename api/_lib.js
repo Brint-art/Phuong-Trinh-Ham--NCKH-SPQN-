@@ -20,34 +20,7 @@ function getClientIp(req) {
 }
 
 function checkRateLimit(req, limit = RATE_LIMIT_MAX) {
-  const userId = getUserIdFromToken(req.headers['authorization']);
-  const key = userId ? `user:${userId}` : `ip:${getClientIp(req)}`;
-  const now = Date.now();
-  
-  if (!requestLog.has(key)) {
-    requestLog.set(key, []);
-  }
-  
-  const history = requestLog.get(key);
-  // Dọn dẹp các lịch sử cũ ngoài window
-  while (history.length > 0 && now - history[0] > RATE_LIMIT_WINDOW_MS) {
-    history.shift();
-  }
-  
-  // Dọn dẹp toàn bộ bộ nhớ cho các key rỗng để tránh memory leak
-  if (requestLog.size > 10000) {
-    for (const [k, v] of requestLog.entries()) {
-      if (v.length === 0 || now - v[v.length - 1] > RATE_LIMIT_WINDOW_MS) {
-        requestLog.delete(k);
-      }
-    }
-  }
-  
-  if (history.length >= limit) {
-    return true; // Bị giới hạn
-  }
-  
-  history.push(now);
+  // Đã bỏ giới hạn theo yêu cầu của Admin
   return false;
 }
 
