@@ -1,27 +1,18 @@
-/* ============================================================
-   Hàm số — app.js
-   Xử lý: nạp dữ liệu (Supabase → fallback data.js), điều hướng,
-   render lý thuyết, lọc + hiển thị bài tập, mở/đóng lời giải,
-   hỏi AI, AI tạo bộ bài.
-   ============================================================ */
-
 'use strict';
 
 /* ---------- Tiện ích ---------- */
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-function topicById(id) {
-  return TOPICS.find(t => t.id === id);
-}
-
-function exerciseById(id) {
-  return EXERCISES.find(e => e.id === id);
-}
-
-const DIFFICULTY_LABEL = { 1: 'Cơ bản', 2: 'Vận dụng', 3: 'Nâng cao' };
+let TOPICS = [];
+let LESSONS = [];
+let EXERCISES = [];
+let AI_LIBRARY = [];
+let currentUser = null;
+let currentRole = 'user';
 
 function escapeHtml(s) {
+  if (!s) return '';
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -29,188 +20,134 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-/* Chuyển văn bản có \n thành các <p>, giữ nguyên LaTeX để MathJax xử lý */
 function toHtml(text) {
+  if (!text) return '';
   return text.split('\n').map(part => part.trim()).filter(Boolean)
     .map(part => `<p>${part}</p>`)
     .join('');
 }
 
-/* Gọi MathJax typeset lại sau khi render nội dung mới */
 function typeset(root) {
   if (window.MathJax && window.MathJax.typesetPromise) {
     MathJax.typesetPromise([root]).catch(() => {});
   }
 }
 
-/* ---------- Nạp dữ liệu từ Supabase (Giai đoạn 2) ---------- */
-/* Cấu hình nằm trong supabase-config.js (window.SUPABASE_CONFIG).
-   Anon key được phép công khai vì Row Level Security chỉ cho đọc
-   nội dung đã xuất bản. Chưa cấu hình / lỗi kết nối / bảng trống
-   → dùng dữ liệu tĩnh trong data.js. */
+/* ---------- Supabase Init ---------- */
 const SUPABASE_CFG = window.SUPABASE_CONFIG || { url: '', anonKey: '' };
+let _sbClient = null;
 
-function supabaseClient() {
+function sb() {
+  if (_sbClient) return _sbClient;
   if (!window.supabase || !SUPABASE_CFG.url || !SUPABASE_CFG.anonKey) return null;
-  return window.supabase.createClient(SUPABASE_CFG.url, SUPABASE_CFG.anonKey);
+  _sbClient = window.supabase.createClient(SUPABASE_CFG.url, SUPABASE_CFG.anonKey);
+  return _sbClient;
 }
 
-async function fetchSupabaseData(sb) {
-  const [topics, lessons, exercises, solutions] = await Promise.all([
-    sb.from('topics').select('*').order('display_order'),
-    sb.from('lessons').select('*').eq('is_published', true).order('display_order'),
-    sb.from('exercises').select('*').eq('status', 'published'),
-    sb.from('exercise_solutions').select('*').order('step_number')
-  ]);
-  const failed = [topics, lessons, exercises, solutions].find(r => r.error);
-  if (failed) {
-    console.warn('Không đọc được dữ liệu Supabase:', failed.error.message, '→ dùng dữ liệu tĩnh data.js');
-    return null;
-  }
-  return {
-    topics: topics.data,
-    lessons: lessons.data,
-    exercises: exercises.data,
-    solutions: solutions.data
-  };
-}
-
-/* Chuyển dữ liệu Supabase về đúng cấu trúc data.js để các hàm render không đổi.
-   id nội bộ dùng slug (quen thuộc với data.js), uuid chỉ dùng để nối bảng. */
-function mapSupabaseData(raw) {
-  const topicUuidToSlug = {};
-  const topics = (raw.topics || []).map(t => {
-    const slug = t.slug || String(t.id);
-    topicUuidToSlug[t.id] = slug;
-    return {
-      id: slug,
-      title: t.title || '',
-      slug,
-      description: t.description || '',
-      displayOrder: Number(t.display_order) || 0
-    };
-  });
-
-  const lessons = (raw.lessons || [])
-    .map(l => ({
-      id: l.slug || String(l.id),
-      topicId: topicUuidToSlug[l.topic_id] || null,
-      title: l.title || '',
-      displayOrder: Number(l.display_order) || 0,
-      objective: l.objective || '',
-      sections: Array.isArray(l.sections) ? l.sections : []
-    }))
-    .filter(l => l.topicId);
-
-  const stepsByExercise = {};
-  (raw.solutions || []).forEach(s => {
-    if (!stepsByExercise[s.exercise_id]) stepsByExercise[s.exercise_id] = [];
-    stepsByExercise[s.exercise_id].push({
-      content: s.content_latex || '',
-      explanation: s.explanation || ''
-    });
-  });
-
-  const exercises = (raw.exercises || [])
-    .map(e => ({
-      id: e.slug || String(e.id),
-      topicId: topicUuidToSlug[e.topic_id] || null,
-      title: e.title || '',
-      difficulty: Number(e.difficulty) || 1,
-      techniques: Array.isArray(e.techniques) ? e.techniques : [],
-      type: e.type || '',
-      source: e.source || '',
-      problem: e.problem_latex || '',
-      related: Array.isArray(e.related) ? e.related : [],
-      hint: e.hint || '',
-      steps: stepsByExercise[e.id] || []
-    }))
-    .filter(e => e.topicId);
-
-  return {
-    topics,
-    lessons,
-    exercises,
-    techniques: [...new Set(exercises.flatMap(e => e.techniques))]
-  };
-}
-
-async function loadSiteData() {
-  const sb = supabaseClient();
-  if (!sb) return null;
-  try {
-    const raw = await Promise.race([
-      fetchSupabaseData(sb),
-      new Promise(resolve => setTimeout(() => resolve('timeout'), 6000))
-    ]);
-    if (raw === 'timeout' || raw === null) return null;
-    return mapSupabaseData(raw);
-  } catch (err) {
-    console.warn('Lỗi kết nối Supabase:', err.message, '→ dùng dữ liệu tĩnh data.js');
-    return null;
-  }
-}
-
-/* Đường dẫn gọi API AI: mặc định cùng máy chủ với website.
-   Khi chạy bằng server tĩnh (Sublime Server...), điền apiBase trong
-   supabase-config.js trỏ về URL đã deploy trên Vercel để AI hoạt động. */
+/* ---------- API Của AI ---------- */
 function apiUrl(apiPath) {
   return (SUPABASE_CFG.apiBase || '') + apiPath;
 }
 
-/* ---------- Điều hướng ---------- */
+async function callAiApi(apiPath, payload) {
+  try {
+    const res = await fetch(apiUrl(apiPath), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Lỗi server');
+    return data;
+  } catch (err) {
+    throw new Error('Lỗi gọi AI: ' + err.message);
+  }
+}
+
+/* ---------- Load Data ---------- */
+async function loadData() {
+  const client = sb();
+  if (!client) return;
+
+  const [tRes, lRes, eRes] = await Promise.all([
+    client.from('topics').select('*').order('display_order'),
+    client.from('lessons').select('*').order('display_order'),
+    client.from('exercises').select('*').order('display_order')
+  ]);
+
+  if (tRes.data) TOPICS = tRes.data;
+  if (lRes.data) LESSONS = lRes.data;
+  if (eRes.data) EXERCISES = eRes.data;
+
+  if (currentUser) {
+    const libRes = await client.from('ai_library').select('*').eq('user_id', currentUser.id);
+    if (libRes.data) AI_LIBRARY = libRes.data;
+  }
+}
+
+/* ---------- Điều Hướng ---------- */
 const PAGES = {
   home: '#page-home',
   theory: '#page-theory',
   exercises: '#page-exercises',
-  ai: '#page-ai'
+  library: '#page-library', // ID placeholder
+  admin: '#page-admin'
 };
 
 function navigate(page) {
   Object.entries(PAGES).forEach(([name, selector]) => {
-    $(selector).classList.toggle('hidden', name !== page);
+    const el = $(selector);
+    if (el) el.classList.toggle('hidden', name !== page);
   });
   $$('[data-nav]').forEach(a => {
     a.classList.toggle('active', a.dataset.nav === page);
   });
   window.scrollTo({ top: 0 });
+
+  if (page === 'home') renderHome();
   if (page === 'theory') renderTheory();
   if (page === 'exercises') renderExercises();
-  if (page === 'ai') renderAiForm();
+  if (page === 'admin') renderAdmin();
+  if (page === 'library') renderLibrary();
 }
 
-$$('[data-nav]').forEach(a => {
-  a.addEventListener('click', () => navigate(a.dataset.nav));
+window.addEventListener('hashchange', () => {
+  const name = (location.hash || '').replace('#', '');
+  navigate(PAGES[name] ? name : 'home');
 });
 
-/* ---------- Trang chủ ---------- */
+/* ---------- UI Rendering ---------- */
+
 function renderHome() {
   const box = $('#home-topics');
+  if(!box) return;
   box.innerHTML = TOPICS.map(t => `
     <a class="topic-card" href="#theory" data-topic="${t.id}">
       <h3>${escapeHtml(t.title)}</h3>
       <p>${escapeHtml(t.description)}</p>
     </a>
   `).join('');
+  
   $$('#home-topics .topic-card').forEach(card => {
     card.addEventListener('click', () => {
       currentTopicId = card.dataset.topic;
-      navigate('theory');
     });
   });
 }
 
-/* ---------- Khu lý thuyết ---------- */
-let currentTopicId = null;   // gán trong init() sau khi nạp dữ liệu
+let currentTopicId = null;
 let currentLessonId = null;
+let activeLessonFilterId = null;
 
 function renderTheory() {
   const tabs = $('#theory-topic-tabs');
+  if(!tabs) return;
   tabs.innerHTML = TOPICS.map(t => `
-    <button class="topic-tab ${t.id === currentTopicId ? 'active' : ''}" data-topic="${t.id}">
+    <button class="topic-tab ${t.id == currentTopicId ? 'active' : ''}" data-topic="${t.id}">
       ${escapeHtml(t.title)}
     </button>
   `).join('');
+  
   $$('#theory-topic-tabs .topic-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       currentTopicId = tab.dataset.topic;
@@ -218,396 +155,524 @@ function renderTheory() {
       renderTheory();
     });
   });
-  renderLessonList();
-  renderLessonDetail();
-}
 
-function renderLessonList() {
   const list = $('#lesson-list');
-  const lessons = LESSONS
-    .filter(l => l.topicId === currentTopicId)
-    .sort((a, b) => a.displayOrder - b.displayOrder);
+  const lessons = LESSONS.filter(l => l.topic_id == currentTopicId);
   list.innerHTML = lessons.map(l => `
     <div class="lesson-card" data-lesson="${l.id}">
-      <div>
-        <h3>${escapeHtml(l.title)}</h3>
-        <p class="lesson-meta">Mục tiêu: ${escapeHtml(l.objective)}</p>
-      </div>
-      <span class="tag">${lessons.length ? '' : ''}</span>
+      <h3>${escapeHtml(l.title)}</h3>
     </div>
   `).join('');
+
   $$('#lesson-list .lesson-card').forEach(card => {
     card.addEventListener('click', () => {
       currentLessonId = card.dataset.lesson;
-      renderLessonList();
-      renderLessonDetail();
-      window.scrollTo({ top: $('#lesson-detail').offsetTop - 80, behavior: 'smooth' });
+      renderTheory();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
+
+  if (currentLessonId) {
+    tabs.classList.add('hidden');
+    list.classList.add('hidden');
+  } else {
+    tabs.classList.remove('hidden');
+    list.classList.remove('hidden');
+  }
+
+  renderLessonDetail();
 }
 
 function renderLessonDetail() {
   const box = $('#lesson-detail');
+  if (!box) return;
   if (!currentLessonId) {
     box.classList.add('hidden');
     return;
   }
-  const lesson = LESSONS.find(l => l.id === currentLessonId);
-  const topic = topicById(lesson.topicId);
+  const lesson = LESSONS.find(l => l.id == currentLessonId);
   box.classList.remove('hidden');
   box.innerHTML = `
     <span class="back-link" id="lesson-back">← Chọn bài học khác</span>
     <h2>${escapeHtml(lesson.title)}</h2>
-    <p class="page-desc"><strong>Mục tiêu bài học:</strong> ${escapeHtml(lesson.objective)}</p>
-    ${lesson.sections.map(s => `
-      <div class="lesson-block ${s.type}">
-        <h3><span class="block-label">${s.type === 'definition' ? 'Định nghĩa' : s.type === 'theorem' ? 'Định lý' : s.type === 'technique' ? 'Kỹ thuật' : 'Ví dụ'}</span>${escapeHtml(s.title)}</h3>
-        ${toHtml(s.body)}
-      </div>
-    `).join('')}
+    
+    <div class="lesson-block">
+      <h3>1. Kiến thức bổ trợ</h3>
+      ${toHtml(lesson.supplementary_knowledge)}
+    </div>
+    
+    <div class="lesson-block">
+      <h3>2. Kiến thức nền tảng</h3>
+      ${toHtml(lesson.foundational_knowledge)}
+    </div>
+    
+    <div class="lesson-block">
+      <h3>3. Bài tập đặc trưng</h3>
+      ${toHtml(lesson.characteristic_exercises)}
+    </div>
+    
     <div class="solution-toggle-row">
-      <button class="btn btn-outline" id="lesson-exercises">📝 Luyện bài tập của chuyên đề này</button>
+      <button class="btn btn-outline" id="lesson-exercises">Luyện bài tập phần này</button>
     </div>
   `;
+
   $('#lesson-back').addEventListener('click', () => {
     currentLessonId = null;
-    renderLessonDetail();
+    renderTheory();
   });
+
+
   $('#lesson-exercises').addEventListener('click', () => {
-    $('#filter-topic').value = lesson.topicId;
+    activeLessonFilterId = currentLessonId;
     navigate('exercises');
   });
+
   typeset(box);
-}
-
-/* ---------- Khu bài tập ---------- */
-function populateFilters() {
-  const topicSel = $('#filter-topic');
-  topicSel.innerHTML = '<option value="">Tất cả</option>' +
-    TOPICS.map(t => `<option value="${t.id}">${escapeHtml(t.title)}</option>`).join('');
-
-  const techSel = $('#filter-technique');
-  techSel.innerHTML = '<option value="">Tất cả</option>' +
-    TECHNIQUES.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-
-  const typeSel = $('#filter-type');
-  const types = [...new Set(EXERCISES.map(e => e.type))];
-  typeSel.innerHTML = '<option value="">Tất cả</option>' +
-    types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-
-  const srcSel = $('#filter-source');
-  const sources = [...new Set(EXERCISES.map(e => e.source))];
-  srcSel.innerHTML = '<option value="">Tất cả</option>' +
-    sources.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
-}
-
-function getFilteredExercises() {
-  const fTopic = $('#filter-topic').value;
-  const fTech = $('#filter-technique').value;
-  const fDiff = $('#filter-difficulty').value;
-  const fType = $('#filter-type').value;
-  const fSource = $('#filter-source').value;
-  return EXERCISES.filter(e => {
-    if (fTopic && e.topicId !== fTopic) return false;
-    if (fTech && !e.techniques.includes(fTech)) return false;
-    if (fDiff && String(e.difficulty) !== fDiff) return false;
-    if (fType && e.type !== fType) return false;
-    if (fSource && e.source !== fSource) return false;
-    return true;
-  });
 }
 
 function renderExercises() {
-  $('#exercise-detail').classList.add('hidden');
   const list = $('#exercise-list');
-  const items = getFilteredExercises();
-  if (items.length === 0) {
-    list.innerHTML = '<p class="page-desc">Không có bài tập nào khớp bộ lọc.</p>';
-    return;
-  }
-  list.innerHTML = items.map(e => `
-    <div class="exercise-card" data-exercise="${e.id}">
-      <h3>${escapeHtml(e.title)}</h3>
-      <div class="exercise-tags">
-        <span class="tag">${escapeHtml(topicById(e.topicId).title)}</span>
-        <span class="tag green">${DIFFICULTY_LABEL[e.difficulty]}</span>
-        <span class="tag orange">${escapeHtml(e.type)}</span>
-        <span class="tag purple">${escapeHtml(e.source)}</span>
+  if(!list) return;
+  $('#exercise-detail').classList.add('hidden');
+  list.classList.remove('hidden');
+  $('#exercise-filters')?.classList.remove('hidden');
+  
+  let filteredExercises = EXERCISES;
+  let noticeHtml = '';
+
+  if (activeLessonFilterId) {
+    filteredExercises = EXERCISES.filter(e => e.lesson_id == activeLessonFilterId);
+    const lesson = LESSONS.find(l => l.id == activeLessonFilterId);
+    noticeHtml = `
+      <div class="exercise-card" style="background: var(--primary-color); color: white; padding: 10px 15px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: bold;">Đang hiển thị bài tập của: ${lesson ? escapeHtml(lesson.title) : ''}</span>
+        <button id="clear-lesson-filter" class="btn btn-outline" style="background: white; color: var(--primary-color); padding: 5px 10px; font-size: 0.9em; min-width: auto; height: auto;">Hiển thị tất cả</button>
       </div>
-    </div>
-  `).join('');
+    `;
+  }
+
+  list.innerHTML = noticeHtml + filteredExercises.map(e => {
+    const lesson = LESSONS.find(l => l.id == e.lesson_id);
+    return `
+      <div class="exercise-card" data-exercise="${e.id}" style="cursor: pointer;">
+        <div style="margin-bottom: 10px; font-weight: bold; font-size: 1.1em; line-height: 1.5;">
+          ${toHtml(e.question)}
+        </div>
+        <div class="exercise-tags" style="margin-top: 15px;">
+          <span class="tag" style="background: #f0f0f0; border: 1px solid #ddd; color: #555;">📖 ${lesson ? escapeHtml(lesson.title) : 'Không xác định'}</span>
+          ${(e.tags || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (activeLessonFilterId) {
+    $('#clear-lesson-filter')?.addEventListener('click', () => {
+      activeLessonFilterId = null;
+      renderExercises();
+    });
+  }
+
   $$('#exercise-list .exercise-card').forEach(card => {
     card.addEventListener('click', () => renderExerciseDetail(card.dataset.exercise));
   });
+
+  typeset(list);
 }
 
 function renderExerciseDetail(id) {
-  const e = exerciseById(id);
+  const e = EXERCISES.find(x => x.id == id);
   const box = $('#exercise-detail');
+  $('#exercise-list').classList.add('hidden');
+  $('#exercise-filters').classList.add('hidden');
   box.classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  
+  // Xử lý chèn nút 💡 vào từng dòng đáp án
+  const solutionLines = (e.detailed_solution || '').split('\n').map(line => line.trim()).filter(Boolean);
+  const solutionHtml = solutionLines.map(line => `
+    <p class="solution-line">
+      ${escapeHtml(line)}
+      <span class="ask-icon" title="Hỏi AI bước này" data-line="${escapeHtml(line)}" data-full="${escapeHtml(e.question + '\n' + e.detailed_solution)}">💡</span>
+    </p>
+  `).join('');
+
   box.innerHTML = `
     <span class="back-link" id="exercise-back">← Danh sách bài tập</span>
-    <h2>${escapeHtml(e.title)}</h2>
-    <div class="exercise-tags">
-      <span class="tag">${escapeHtml(topicById(e.topicId).title)}</span>
-      <span class="tag green">${DIFFICULTY_LABEL[e.difficulty]}</span>
-      <span class="tag orange">${escapeHtml(e.type)}</span>
-      <span class="tag purple">${escapeHtml(e.source)}</span>
-      ${e.techniques.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}
+    
+    <div class="exercise-block">
+      <h3>Đề bài</h3>
+      ${toHtml(e.question)}
     </div>
-    <h3>Đề bài</h3>
-    <p class="problem">${e.problem}</p>
-    <h3>Kiến thức liên quan</h3>
-    <p>${e.related.map(r => escapeHtml(r)).join(' · ')}</p>
-    <h3>Gợi ý</h3>
-    <div class="hint-box">${e.hint}</div>
-    <div class="solution-toggle-row">
-      <button class="btn btn-primary" id="toggle-solution">Xem lời giải tham khảo</button>
+    
+    <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" id="toggle-solution">Xem đáp án chi tiết</button>
+        <button class="btn btn-outline" id="generate-similar-ai">Tạo câu hỏi tương tự (AI)</button>
     </div>
-    <div class="solution-steps hidden" id="solution-steps">
-      <h3>Lời giải tham khảo</h3>
-      ${e.steps.map((s, i) => `
-        <div class="solution-step">
-          <div class="step-head">
-            <strong>Bước ${i + 1}</strong>
-            <button class="ask-ai-btn" data-exercise="${e.id}" data-step="${i}">🤖 Hỏi AI về bước này</button>
-          </div>
-          <div>${s.content}</div>
-          <div class="step-explanation">💡 ${escapeHtml(s.explanation)}</div>
-        </div>
-      `).join('')}
+    
+    <div class="exercise-block hidden" id="solution-box" style="margin-top: 20px;">
+      <h3>Đáp án chi tiết</h3>
+      ${solutionHtml}
     </div>
   `;
+
   $('#exercise-back').addEventListener('click', () => {
     box.classList.add('hidden');
-    window.scrollTo({ top: $('#exercise-list').offsetTop - 80, behavior: 'smooth' });
+    $('#exercise-list').classList.remove('hidden');
+    $('#exercise-filters').classList.remove('hidden');
   });
-  $('#toggle-solution').addEventListener('click', () => {
-    const steps = $('#solution-steps');
-    const btn = $('#toggle-solution');
-    const isHidden = steps.classList.contains('hidden');
-    steps.classList.toggle('hidden', !isHidden);
-    btn.textContent = isHidden ? 'Ẩn lời giải' : 'Xem lời giải tham khảo';
-    if (isHidden) typeset(steps);
+
+  $('#toggle-solution').addEventListener('click', (btn) => {
+    $('#solution-box').classList.toggle('hidden');
+    btn.target.style.display = 'none';
   });
-  $$('.ask-ai-btn', box).forEach(btn => {
-    btn.addEventListener('click', () => openAskModal(btn.dataset.exercise, Number(btn.dataset.step)));
+
+  $('#generate-similar-ai').addEventListener('click', async (btn) => {
+    btn.target.innerText = 'Đang tạo...';
+    btn.target.disabled = true;
+    try {
+      const lesson = LESSONS.find(l => l.id === e.lesson_id);
+      const foundational = lesson ? lesson.foundational_knowledge : '';
+      const data = await callAiApi('/api/generate-similar', {
+         original_question: e.question,
+         original_solution: e.detailed_solution,
+         tags: e.tags,
+         foundational_knowledge: foundational
+      });
+      // Show in Modal instead of replacing view
+      $('#generate-content').innerHTML = `
+        <div class="exercise-block">
+          <h4 style="margin-bottom:10px;">Đề bài</h4>
+          ${toHtml(data.question)}
+        </div>
+        <div class="exercise-block" style="margin-top: 20px;">
+          <h4 style="margin-bottom:10px;">Đáp án chi tiết</h4>
+          ${toHtml(data.detailed_solution)}
+        </div>
+      `;
+      $('#generate-modal').classList.remove('hidden');
+      $('#save-library-ai').classList.remove('hidden');
+
+      // Clear old listeners by cloning
+      const oldSaveBtn = $('#save-library-ai');
+      const newSaveBtn = oldSaveBtn.cloneNode(true);
+      oldSaveBtn.parentNode.replaceChild(newSaveBtn, oldSaveBtn);
+
+      newSaveBtn.addEventListener('click', async () => {
+         if(!currentUser) return alert('Đăng nhập để lưu');
+         newSaveBtn.innerText = 'Đang lưu...';
+         const client = sb();
+         await client.from('ai_library').insert([{
+             user_id: currentUser.id,
+             original_exercise_id: id,
+             question: data.question,
+             detailed_solution: data.detailed_solution
+         }]);
+         alert('Đã lưu vào thư viện!');
+         newSaveBtn.innerText = 'Đã lưu';
+         newSaveBtn.disabled = true;
+         loadData();
+      });
+      typeset($('#generate-content'));
+    } catch(err) {
+      alert('Lỗi: ' + err.message);
+      btn.target.innerText = 'Tạo câu hỏi tương tự (AI)';
+      btn.target.disabled = false;
+    }
   });
+
+  // Gắn event cho Nút Hỏi AI
+  $$('.ask-icon', box).forEach(icon => {
+    icon.addEventListener('click', (ev) => {
+      openAskModal(ev.target.dataset.line, ev.target.dataset.full);
+    });
+  });
+
   typeset(box);
-  window.scrollTo({ top: box.offsetTop - 80, behavior: 'smooth' });
 }
 
-/* ---------- Hỏi AI về lời giải ---------- */
-const QUICK_QUESTIONS = [
-  'Vì sao cần thế biến này?',
-  'Bước này dùng định lý nào?',
-  'Tại sao suy ra được điều đó?',
-  'Có thể dùng cách khác không?',
-  'Hãy giải thích đơn giản hơn.'
-];
+/* ---------- Hybrid AI Logic ---------- */
+let currentAiContext = null;
 
-function openAskModal(exerciseId, stepIndex) {
-  const e = exerciseById(exerciseId);
-  const step = e.steps[stepIndex];
-  $('#ask-exercise').value = exerciseId;
-  $('#ask-step').value = stepIndex;
-  $('#ask-question-label').textContent = `Bài: ${e.title} — Bước ${stepIndex + 1}: ${step.content.replace(/\$/g, '')}`;
-  $('#ask-answers').innerHTML = QUICK_QUESTIONS.map(q =>
-    `<button type="button" class="quick-question">${escapeHtml(q)}</button>`
-  ).join('');
-  $$('#ask-answers .quick-question').forEach(btn => {
-    btn.addEventListener('click', () => {
-      $('#ask-input').value = btn.textContent;
-    });
-  });
-  $('#ask-result').innerHTML = '';
+function openAskModal(lineText, fullContext) {
+  currentAiContext = { line: lineText, full: fullContext };
+  $('#ask-quick-explanation').innerHTML = "<em>Đang hỏi Gia sư AI...</em>";
   $('#ask-modal').classList.remove('hidden');
-  $('#ask-input').focus();
+  
+  // Fake call AI API for quick explanation
+  // TODO: Call real API here
+  setTimeout(() => {
+    $('#ask-quick-explanation').innerHTML = "<strong>Giải thích nhanh:</strong> Bước này áp dụng định lý cơ bản để khử biến số. Việc đặt x=0 giúp loại bỏ các ẩn phụ không cần thiết.";
+  }, 1000);
 }
 
-$('#ask-close').addEventListener('click', () => $('#ask-modal').classList.add('hidden'));
-$('#ask-modal').addEventListener('click', (ev) => {
-  if (ev.target === $('#ask-modal')) $('#ask-modal').classList.add('hidden');
+$('#ask-close')?.addEventListener('click', () => {
+  $('#ask-modal').classList.add('hidden');
 });
 
-$('#ask-form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const e = exerciseById($('#ask-exercise').value);
-  const stepIndex = Number($('#ask-step').value);
-  const question = $('#ask-input').value.trim();
-  if (!e || !question) return;
-
-  const resultBox = $('#ask-result');
-  resultBox.innerHTML = '<p>⏳ Đang gửi câu hỏi đến AI…</p>';
-
-  try {
-    const res = await fetch(apiUrl('/api/ask-solution'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        problem: e.problem,
-        solutionSteps: e.steps.map(s => s.content),
-        stepIndex,
-        question
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Có lỗi xảy ra');
-    resultBox.innerHTML = `<strong>🤖 AI trả lời:</strong>\n\n${escapeHtml(data.answer)}`;
-    typeset(resultBox);
-  } catch (err) {
-    resultBox.innerHTML = `<p class="ai-error">Không thể kết nối API AI. ${escapeHtml(err.message)}</p>
-      <p>Gợi ý: chạy <code>vercel dev</code> để dùng API, hoặc triển khai lên Vercel với biến môi trường MISTRAL_API_KEY.</p>`;
-  }
+$('#btn-open-chat')?.addEventListener('click', () => {
+  $('#ask-modal').classList.add('hidden');
+  $('#chat-sidebar').classList.remove('hidden');
+  
+  const chatBody = $('#chat-messages');
+  chatBody.innerHTML = `
+    <div class="chat-msg ai">Chào bạn, tôi là Gia sư AI. Bạn đang thắc mắc về bước: <strong>"${escapeHtml(currentAiContext.line)}"</strong>. Bạn muốn hỏi thêm chi tiết gì?</div>
+  `;
 });
 
-/* ---------- AI tạo bộ bài ---------- */
-function renderAiForm() {
-  const topicSel = $('#ai-topic');
-  topicSel.innerHTML = TOPICS.map(t =>
-    `<option value="${t.id}">${escapeHtml(t.title)}</option>`
-  ).join('');
-  const techSel = $('#ai-technique');
-  techSel.innerHTML = '<option value="">Tất cả kỹ thuật</option>' +
-    TECHNIQUES.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-}
-
-$('#ai-form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const topic = topicById($('#ai-topic').value);
-  const technique = $('#ai-technique').value;
-  const difficulty = Number($('#ai-difficulty').value);
-  const count = Math.min(Math.max(Number($('#ai-count').value) || 3, 1), 10);
-
-  const status = $('#ai-status');
-  const resultBox = $('#ai-result');
-  const submitBtn = $('#ai-submit');
-
-  status.className = 'ai-status';
-  status.textContent = '⏳ AI đang tạo bộ bài…';
-  resultBox.classList.add('hidden');
-  submitBtn.disabled = true;
-
-  try {
-    const res = await fetch(apiUrl('/api/generate-exercises'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: topic.title, technique, difficulty, count })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Có lỗi xảy ra');
-    renderAiResult(data, topic);
-    status.textContent = data.isDemo
-      ? '⚠️ Đây là bộ bài mẫu (chưa cấu hình MISTRAL_API_KEY). Cấu hình key để AI tạo bài thật.'
-      : '✅ Đã tạo xong bộ bài.';
-  } catch (err) {
-    status.className = 'ai-status ai-error';
-    status.textContent = 'Không thể kết nối API AI. ' + err.message;
-  } finally {
-    submitBtn.disabled = false;
-  }
+$('#chat-close')?.addEventListener('click', () => {
+  $('#chat-sidebar').classList.add('hidden');
 });
 
-function renderAiResult(data, topic) {
-  const resultBox = $('#ai-result');
-  const exercises = data.exercises || [];
-  if (exercises.length === 0) {
-    resultBox.innerHTML = '<p>AI không trả về bài nào. Hãy thử lại.</p>';
-    resultBox.classList.remove('hidden');
+$('#generate-close')?.addEventListener('click', () => {
+  $('#generate-modal').classList.add('hidden');
+});
+
+$('#chat-form')?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = $('#chat-input');
+  const text = input.value.trim();
+  if(!text) return;
+
+  const chatBody = $('#chat-messages');
+  chatBody.innerHTML += `<div class="chat-msg user">${escapeHtml(text)}</div>`;
+  input.value = '';
+  
+  // Tạm hiển thị AI đang nghĩ
+  chatBody.innerHTML += `<div class="chat-msg ai" id="ai-typing"><em>Đang suy nghĩ...</em></div>`;
+  chatBody.scrollTop = chatBody.scrollHeight;
+
+  // Fake call
+  setTimeout(() => {
+    $('#ai-typing').remove();
+    chatBody.innerHTML += `<div class="chat-msg ai">Do chúng ta đã giả sử hàm liên tục, nên khi triệt tiêu y, ta sẽ có được phương trình hằng số. Đó là lý do dấu âm bị triệt tiêu!</div>`;
+    chatBody.scrollTop = chatBody.scrollHeight;
+  }, 1500);
+});
+
+
+/* ---------- Admin Logic ---------- */
+function renderAdmin() {
+  if (!currentUser) {
+    $('#admin-notice').classList.remove('hidden');
+    $('#admin-notice').innerHTML = "Vui lòng đăng nhập để truy cập Admin.";
+    $('#admin-body').classList.add('hidden');
     return;
   }
-  resultBox.innerHTML = `
-    <div class="ai-result-actions">
-      <button class="btn btn-primary" id="print-set">🖨️ In bộ bài</button>
-      <button class="btn btn-outline" id="save-set">💾 Lưu bộ bài (JSON)</button>
+  if (currentRole !== 'admin') {
+    $('#admin-notice').classList.remove('hidden');
+    $('#admin-notice').innerHTML = "Bạn không có quyền quản trị. Chỉ tài khoản Admin mới được phép vào khu vực này.";
+    $('#admin-body').classList.add('hidden');
+    return;
+  }
+  
+  $('#admin-notice').classList.add('hidden');
+  $('#admin-body').classList.remove('hidden');
+
+  // Populate Selects
+  const topicSel = $('#admin-lesson-topic');
+  if(topicSel) topicSel.innerHTML = TOPICS.map(t => `<option value="${t.id}">${escapeHtml(t.title)}</option>`).join('');
+
+  const lessonSel = $('#admin-exercise-lesson');
+  if(lessonSel) lessonSel.innerHTML = LESSONS.map(l => `<option value="${l.id}">${escapeHtml(l.title)}</option>`).join('');
+}
+
+$('#admin-lesson-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const data = {
+    topic_id: $('#admin-lesson-topic').value,
+    title: $('#admin-lesson-title').value,
+    slug: $('#admin-lesson-slug').value,
+    supplementary_knowledge: $('#admin-lesson-supplementary').value,
+    foundational_knowledge: $('#admin-lesson-foundational').value,
+    characteristic_exercises: $('#admin-lesson-characteristic').value
+  };
+  const client = sb();
+  const { error } = await client.from('lessons').insert([data]);
+  if(error) alert('Lỗi: ' + error.message);
+  else {
+    alert('Lưu bài học thành công!');
+    loadData();
+  }
+});
+
+$('#admin-exercise-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const data = {
+    lesson_id: $('#admin-exercise-lesson').value,
+    tags: $('#admin-exercise-tags').value.split(',').map(s=>s.trim()),
+    question: $('#admin-exercise-question').value,
+    detailed_solution: $('#admin-exercise-solution').value
+  };
+  const client = sb();
+  const { error } = await client.from('exercises').insert([data]);
+  if(error) alert('Lỗi: ' + error.message);
+  else {
+    alert('Lưu bài tập thành công!');
+    loadData();
+  }
+});
+
+/* ---------- Thư viện AI ---------- */
+function renderLibrary() {
+  const list = $('#library-list');
+  if (!currentUser) {
+    list.innerHTML = '<p class="page-desc">Vui lòng đăng nhập để xem thư viện cá nhân của bạn.</p>';
+    return;
+  }
+  if (AI_LIBRARY.length === 0) {
+    list.innerHTML = '<p class="page-desc">Bạn chưa lưu bài tập AI nào. Hãy sang phần "Bài tập" và tạo câu hỏi tương tự bằng AI nhé.</p>';
+    return;
+  }
+  list.innerHTML = AI_LIBRARY.map(item => `
+    <div class="exercise-card" style="margin-bottom: 20px;">
+      <h3 style="margin-bottom: 10px;">${escapeHtml(item.question)}</h3>
+      <details>
+        <summary style="cursor: pointer; font-weight: bold; margin-bottom: 10px; color: var(--primary-color);">Xem đáp án chi tiết</summary>
+        <div class="lesson-block">${toHtml(item.detailed_solution)}</div>
+      </details>
+      <button class="btn btn-outline btn-delete-ai" data-id="${item.id}" style="margin-top: 10px; color: red; border-color: red;">Xóa khỏi thư viện</button>
     </div>
-    ${exercises.map((ex, i) => `
-      <div class="ai-exercise">
-        <h3>Bài ${i + 1}. ${escapeHtml(ex.title || '')}</h3>
-        <p><strong>Đề bài:</strong> ${escapeHtml(ex.problem || '')}</p>
-        ${ex.hint ? `<div class="hint-box"><strong>Gợi ý:</strong> ${escapeHtml(ex.hint)}</div>` : ''}
-        ${(ex.solutionSteps && ex.solutionSteps.length) ? `
-          <div class="solution-toggle-row">
-            <button class="btn btn-ghost toggle-ai-solution">Xem lời giải</button>
-          </div>
-          <div class="solution-steps hidden">
-            ${ex.solutionSteps.map((s, j) => `<div class="solution-step"><strong>Bước ${j + 1}.</strong> ${escapeHtml(s)}</div>`).join('')}
-          </div>
-        ` : ''}
-      </div>
-    `).join('')}
-  `;
-  $$('.toggle-ai-solution', resultBox).forEach(btn => {
-    btn.addEventListener('click', () => {
-      const steps = btn.closest('.ai-exercise').querySelector('.solution-steps');
-      const isHidden = steps.classList.contains('hidden');
-      steps.classList.toggle('hidden', !isHidden);
-      btn.textContent = isHidden ? 'Ẩn lời giải' : 'Xem lời giải';
-      if (isHidden) typeset(steps);
+  `).join('');
+
+  typeset(list);
+
+  $$('.btn-delete-ai').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if(confirm('Bạn có chắc muốn xóa bài tập này?')) {
+        const client = sb();
+        await client.from('ai_library').delete().eq('id', id);
+        AI_LIBRARY = AI_LIBRARY.filter(i => i.id !== id);
+        renderLibrary();
+      }
     });
   });
-  $('#print-set').addEventListener('click', () => {
-    const originalTitle = document.title;
-    document.title = `Bộ bài tự luyện — ${topic.title}`;
-    window.print();
-    document.title = originalTitle;
-  });
-  $('#save-set').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify({ topic: topic.title, generatedAt: new Date().toISOString(), exercises }, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'bo-bai-tu-luyen.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
-  resultBox.classList.remove('hidden');
-  typeset(resultBox);
 }
 
-/* ---------- Khởi động ---------- */
-/* Loại bỏ bài học/bài tập không còn chuyên đề tương ứng sau khi trộn
-   dữ liệu Supabase + tĩnh — tránh lỗi hiển thị do dữ liệu lệch nhau. */
-function pruneOrphans() {
-  const topicIds = new Set(TOPICS.map(t => t.id));
-  [LESSONS, EXERCISES].forEach(list => {
-    const kept = list.filter(item => topicIds.has(item.topicId));
-    list.length = 0;
-    list.push(...kept);
-  });
-}
-
-async function init() {
-  const remote = await loadSiteData();
-  const useFallback = SUPABASE_CFG.useStaticFallback !== false;
-  /* Database chỉ "kích hoạt" khi đã có ít nhất một bài học hoặc bài tập.
-     Nếu Supabase mới chỉ có chuyên đề (topics) thì website vẫn dùng dữ liệu
-     tĩnh — tránh hiển thị các chuyên đề rỗng không có bài học nào. */
-  const dbActive = remote && (remote.lessons.length > 0 || remote.exercises.length > 0);
-  if (remote && dbActive) {
-    if (useFallback) {
-      if (remote.topics.length) { TOPICS.length = 0; TOPICS.push(...remote.topics); }
-      if (remote.lessons.length) { LESSONS.length = 0; LESSONS.push(...remote.lessons); }
-      if (remote.exercises.length) { EXERCISES.length = 0; EXERCISES.push(...remote.exercises); }
-      if (remote.techniques.length) { TECHNIQUES.length = 0; TECHNIQUES.push(...remote.techniques); }
-    } else {
-      TOPICS.length = 0; TOPICS.push(...remote.topics);
-      LESSONS.length = 0; LESSONS.push(...remote.lessons);
-      EXERCISES.length = 0; EXERCISES.push(...remote.exercises);
-      TECHNIQUES.length = 0; TECHNIQUES.push(...remote.techniques);
-    }
-    pruneOrphans();
+/* ---------- Xác thực ---------- */
+async function updateAuthState(session) {
+  currentUser = session?.user || null;
+  currentRole = 'user';
+  if (currentUser) {
+    const { data } = await sb().from('profiles').select('role').eq('id', currentUser.id).maybeSingle();
+    if (data) currentRole = data.role;
   }
-  currentTopicId = TOPICS[0] ? TOPICS[0].id : null;
-  currentLessonId = null;
+  renderAuth();
+}
 
-  populateFilters();
-  renderHome();
+function renderAuth() {
+  const box = $('#auth-box');
+  const navAdmin = $('#nav-admin');
+  const navLibrary = $('#nav-library');
+  
+  if (currentUser) {
+    const name = currentUser.user_metadata?.name || currentUser.email;
+    box.innerHTML = `<span style="margin-right:10px; font-weight: 500;">👤 ${escapeHtml(name)}</span> <button class="btn btn-outline" id="btn-logout" style="padding: 4px 8px; font-size: 0.9em;">Đăng xuất</button>`;
+    $('#btn-logout').addEventListener('click', async () => {
+      await sb().auth.signOut();
+    });
+    
+    navLibrary.classList.remove('hidden');
+    if (currentRole === 'admin') {
+      navAdmin.classList.remove('hidden');
+    } else {
+      navAdmin.classList.add('hidden');
+    }
+  } else {
+    box.innerHTML = `<button class="btn btn-primary" id="btn-show-auth" style="padding: 4px 12px;">Đăng nhập</button>`;
+    $('#btn-show-auth').addEventListener('click', () => {
+      $('#auth-modal').classList.remove('hidden');
+    });
+    navLibrary.classList.add('hidden');
+    navAdmin.classList.add('hidden');
+  }
+}
 
-  $$('#exercise-filters select').forEach(sel => sel.addEventListener('change', renderExercises));
-  $('#filter-reset').addEventListener('click', () => {
-    $$('#exercise-filters select').forEach(sel => { sel.value = ''; });
-    renderExercises();
+function setupAuthModal() {
+  let isLogin = true;
+  const modal = $('#auth-modal');
+  const form = $('#auth-form');
+  const msg = $('#auth-msg');
+  const nameLabel = $('#auth-name').parentElement;
+  
+  $('#auth-close').addEventListener('click', () => modal.classList.add('hidden'));
+  
+  $('#mode-login').addEventListener('click', e => {
+    isLogin = true;
+    e.target.classList.add('active');
+    $('#mode-signup').classList.remove('active');
+    nameLabel.style.display = 'none';
+    $('#auth-submit').textContent = 'Đăng nhập';
+    msg.textContent = '';
+  });
+  
+  $('#mode-signup').addEventListener('click', e => {
+    isLogin = false;
+    e.target.classList.add('active');
+    $('#mode-login').classList.remove('active');
+    nameLabel.style.display = 'block';
+    $('#auth-submit').textContent = 'Đăng ký';
+    msg.textContent = '';
+  });
+  
+  nameLabel.style.display = 'none';
+  
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = $('#auth-email').value;
+    const password = $('#auth-password').value;
+    const name = $('#auth-name').value;
+    const client = sb();
+    
+    msg.textContent = 'Đang xử lý...';
+    msg.style.color = 'var(--text-color)';
+    
+    if (isLogin) {
+      const { error } = await client.auth.signInWithPassword({ email, password });
+      if (error) {
+        msg.textContent = 'Lỗi đăng nhập: ' + (error.message.includes('Invalid login') ? 'Sai email hoặc mật khẩu' : error.message);
+        msg.style.color = 'red';
+      } else {
+        modal.classList.add('hidden');
+        form.reset();
+      }
+    } else {
+      const { error } = await client.auth.signUp({
+        email, password,
+        options: { data: { name } }
+      });
+      if (error) {
+        msg.textContent = 'Lỗi đăng ký: ' + error.message;
+        msg.style.color = 'red';
+      } else {
+        msg.textContent = 'Đăng ký thành công! Bạn có thể đăng nhập ngay.';
+        msg.style.color = 'green';
+        form.reset();
+      }
+    }
   });
 }
 
-init();
+/* ---------- Khởi chạy ---------- */
+async function init() {
+  setupAuthModal();
+  const client = sb();
+  
+  if (client) {
+    const { data: { session } } = await client.auth.getSession();
+    await updateAuthState(session);
+    
+    client.auth.onAuthStateChange(async (event, session) => {
+      await updateAuthState(session);
+      loadData();
+    });
+  }
+
+  await loadData();
+  
+  const hashPage = (location.hash || '').replace('#', '');
+  navigate(PAGES[hashPage] ? hashPage : 'home');
+}
+
+document.addEventListener('DOMContentLoaded', init);
