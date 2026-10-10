@@ -74,37 +74,9 @@ CREATE TRIGGER hamso_handle_new_user
 -- ============================================================
 
 -- 1. Bảng `lessons`: Thêm 3 cột khung mới
-DO $$
-DECLARE
-    lesson_record RECORD;
-    section_json JSONB;
-    v_supp TEXT;
-    v_found TEXT;
-    v_char TEXT;
-BEGIN
-    FOR lesson_record IN SELECT id, sections FROM lessons WHERE sections IS NOT NULL AND sections != '[]'::jsonb LOOP
-        v_supp := '';
-        v_found := '';
-        v_char := '';
-        
-        FOR section_json IN SELECT * FROM jsonb_array_elements(lesson_record.sections) LOOP
-            IF section_json->>'type' = 'definition' OR section_json->>'type' = 'theorem' THEN
-                v_found := v_found || '<h4>' || COALESCE(section_json->>'title', '') || '</h4><p>' || COALESCE(section_json->>'body', '') || '</p>';
-            ELSIF section_json->>'type' = 'technique' THEN
-                v_supp := v_supp || '<h4>' || COALESCE(section_json->>'title', '') || '</h4><p>' || COALESCE(section_json->>'body', '') || '</p>';
-            ELSIF section_json->>'type' = 'example' THEN
-                v_char := v_char || '<h4>' || COALESCE(section_json->>'title', '') || '</h4><p>' || COALESCE(section_json->>'body', '') || '</p>';
-            END IF;
-        END LOOP;
-        
-        UPDATE lessons 
-        SET 
-            foundational_knowledge = CASE WHEN foundational_knowledge = '' THEN v_found ELSE foundational_knowledge END,
-            supplementary_knowledge = CASE WHEN supplementary_knowledge = '' THEN v_supp ELSE supplementary_knowledge END,
-            characteristic_exercises = CASE WHEN characteristic_exercises = '' THEN v_char ELSE characteristic_exercises END
-        WHERE id = lesson_record.id;
-    END LOOP;
-END $$;
+ALTER TABLE lessons ADD COLUMN IF NOT EXISTS supplementary_knowledge TEXT DEFAULT '';
+ALTER TABLE lessons ADD COLUMN IF NOT EXISTS foundational_knowledge TEXT DEFAULT '';
+ALTER TABLE lessons ADD COLUMN IF NOT EXISTS characteristic_exercises TEXT DEFAULT '';
 
 -- 2. Bảng `exercises`: Cập nhật cấu trúc 2 khung
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS lesson_id UUID REFERENCES lessons(id) ON DELETE CASCADE;
@@ -121,31 +93,7 @@ ALTER TABLE lessons ADD COLUMN IF NOT EXISTS is_published BOOLEAN DEFAULT false;
 ALTER TABLE exercises ALTER COLUMN title DROP NOT NULL;
 ALTER TABLE exercises ALTER COLUMN problem_latex DROP NOT NULL;
 
--- Di chuyển dữ liệu từ `problem_latex` sang `question`
-UPDATE exercises SET question = problem_latex WHERE question = '' AND problem_latex IS NOT NULL;
-
--- Di chuyển dữ liệu từ bảng `exercise_solutions` (nếu có) sang `detailed_solution`
-DO $$
-DECLARE
-    ex_record RECORD;
-    v_solution TEXT;
-BEGIN
-    -- Gom nhóm tất cả step_number thành một text
-    FOR ex_record IN SELECT id FROM exercises LOOP
-        SELECT string_agg(content_latex || ' ' || explanation, e'\n' ORDER BY step_number)
-        INTO v_solution
-        FROM exercise_solutions
-        WHERE exercise_id = ex_record.id;
-        
-        IF v_solution IS NOT NULL AND v_solution != '' THEN
-            UPDATE exercises 
-            SET detailed_solution = v_solution
-            WHERE id = ex_record.id AND detailed_solution = '';
-        END IF;
-    END LOOP;
-END $$;
-
--- 3. Bảng `profiles` đã được tạo trong schema-v2-roles.sql nên bỏ qua ở đây.
+-- 3. Bảng `profiles` đã được tạo trong schema-v3 nên bỏ qua ở đây.
 
 -- 4. Bảng `ai_library` (Lưu trữ bài do AI sinh)
 CREATE TABLE IF NOT EXISTS ai_library (
