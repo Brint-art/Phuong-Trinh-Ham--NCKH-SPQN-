@@ -23,7 +23,13 @@ function escapeHtml(s) {
 function toHtml(text) {
   if (!text) return '';
   return text.split('\n').map(part => part.trim()).filter(Boolean)
-    .map(part => `<p>${part}</p>`)
+    .map(part => {
+      let escaped = escapeHtml(part);
+      if (escaped.startsWith('### ')) {
+        return `<h4>${escaped.substring(4)}</h4>`;
+      }
+      return `<p>${escaped}</p>`;
+    })
     .join('');
 }
 
