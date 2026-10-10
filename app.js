@@ -475,10 +475,98 @@ function renderAdmin() {
 
   const lessonSel = $('#admin-exercise-lesson');
   if(lessonSel) lessonSel.innerHTML = LESSONS.map(l => `<option value="${l.id}">${escapeHtml(l.title)}</option>`).join('');
+
+  renderAdminLists();
 }
+
+function renderAdminLists() {
+  const lessonList = $('#admin-lessons-list');
+  if (lessonList) {
+    lessonList.innerHTML = '<h3>Danh sách Lý thuyết</h3>' + LESSONS.map(l => `
+      <div style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
+        <strong>${escapeHtml(l.title)}</strong> (Slug: ${escapeHtml(l.slug)})
+        <div style="margin-top: 10px;">
+          <button class="btn btn-primary btn-edit-lesson" data-id="${l.id}" style="padding: 4px 8px; font-size: 0.9em;">Sửa</button>
+          <button class="btn btn-outline btn-delete-lesson" data-id="${l.id}" style="padding: 4px 8px; font-size: 0.9em; color: red; border-color: red;">Xóa</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  const exList = $('#admin-exercises-list');
+  if (exList) {
+    exList.innerHTML = '<h3>Danh sách Bài tập</h3>' + EXERCISES.map(e => {
+      const lessonTitle = LESSONS.find(l => l.id === e.lesson_id)?.title || 'Không rõ';
+      return `
+      <div style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
+        <strong>Bài thuộc: ${escapeHtml(lessonTitle)}</strong>
+        <p>${escapeHtml(e.question || '').substring(0, 100)}...</p>
+        <div style="margin-top: 10px;">
+          <button class="btn btn-primary btn-edit-exercise" data-id="${e.id}" style="padding: 4px 8px; font-size: 0.9em;">Sửa</button>
+          <button class="btn btn-outline btn-delete-exercise" data-id="${e.id}" style="padding: 4px 8px; font-size: 0.9em; color: red; border-color: red;">Xóa</button>
+        </div>
+      </div>
+    `}).join('');
+  }
+}
+
+document.addEventListener('click', async e => {
+  if (e.target.matches('.btn-edit-lesson')) {
+    const l = LESSONS.find(x => x.id === e.target.dataset.id);
+    if (!l) return;
+    $('#admin-lesson-id').value = l.id;
+    $('#admin-lesson-topic').value = l.topic_id;
+    $('#admin-lesson-title').value = l.title;
+    $('#admin-lesson-slug').value = l.slug;
+    $('#admin-lesson-supplementary').value = l.supplementary_knowledge || '';
+    $('#admin-lesson-foundational').value = l.foundational_knowledge || '';
+    $('#admin-lesson-characteristic').value = l.characteristic_exercises || '';
+    $('#admin-lesson-title').focus();
+  }
+  
+  if (e.target.matches('.btn-delete-lesson')) {
+    if (confirm('Bạn có chắc muốn xóa bài học này?')) {
+      const client = sb();
+      await client.from('lessons').delete().eq('id', e.target.dataset.id);
+      await loadData();
+      renderAdmin();
+    }
+  }
+
+  if (e.target.matches('.btn-edit-exercise')) {
+    const ex = EXERCISES.find(x => x.id === e.target.dataset.id);
+    if (!ex) return;
+    $('#admin-exercise-id').value = ex.id;
+    $('#admin-exercise-lesson').value = ex.lesson_id;
+    $('#admin-exercise-tags').value = (ex.tags || []).join(', ');
+    $('#admin-exercise-question').value = ex.question || '';
+    $('#admin-exercise-solution').value = ex.detailed_solution || '';
+    $('#admin-exercise-question').focus();
+  }
+  
+  if (e.target.matches('.btn-delete-exercise')) {
+    if (confirm('Bạn có chắc muốn xóa bài tập này?')) {
+      const client = sb();
+      await client.from('exercises').delete().eq('id', e.target.dataset.id);
+      await loadData();
+      renderAdmin();
+    }
+  }
+});
+
+$('#admin-lesson-clear')?.addEventListener('click', () => {
+  $('#admin-lesson-form').reset();
+  $('#admin-lesson-id').value = '';
+});
+
+$('#admin-exercise-clear')?.addEventListener('click', () => {
+  $('#admin-exercise-form').reset();
+  $('#admin-exercise-id').value = '';
+});
 
 $('#admin-lesson-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const id = $('#admin-lesson-id').value;
   const data = {
     topic_id: $('#admin-lesson-topic').value,
     title: $('#admin-lesson-title').value,
@@ -488,28 +576,43 @@ $('#admin-lesson-form')?.addEventListener('submit', async (e) => {
     characteristic_exercises: $('#admin-lesson-characteristic').value
   };
   const client = sb();
-  const { error } = await client.from('lessons').insert([data]);
-  if(error) alert('Lỗi: ' + error.message);
+  
+  let res;
+  if (id) res = await client.from('lessons').update(data).eq('id', id);
+  else res = await client.from('lessons').insert([data]);
+  
+  if(res.error) alert('Lỗi: ' + res.error.message);
   else {
     alert('Lưu bài học thành công!');
-    loadData();
+    $('#admin-lesson-form').reset();
+    $('#admin-lesson-id').value = '';
+    await loadData();
+    renderAdmin();
   }
 });
 
 $('#admin-exercise-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
+  const id = $('#admin-exercise-id').value;
   const data = {
     lesson_id: $('#admin-exercise-lesson').value,
-    tags: $('#admin-exercise-tags').value.split(',').map(s=>s.trim()),
+    tags: $('#admin-exercise-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
     question: $('#admin-exercise-question').value,
     detailed_solution: $('#admin-exercise-solution').value
   };
   const client = sb();
-  const { error } = await client.from('exercises').insert([data]);
-  if(error) alert('Lỗi: ' + error.message);
+  
+  let res;
+  if (id) res = await client.from('exercises').update(data).eq('id', id);
+  else res = await client.from('exercises').insert([data]);
+  
+  if(res.error) alert('Lỗi: ' + res.error.message);
   else {
     alert('Lưu bài tập thành công!');
-    loadData();
+    $('#admin-exercise-form').reset();
+    $('#admin-exercise-id').value = '';
+    await loadData();
+    renderAdmin();
   }
 });
 
