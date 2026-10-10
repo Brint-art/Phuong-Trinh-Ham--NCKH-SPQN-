@@ -6,6 +6,7 @@
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'ministral-14b-latest';
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
+const { checkRateLimit, applyCors } = require('./_lib');
 
 async function readJsonBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -66,11 +67,12 @@ function extractJson(text) {
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (applyCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Chỉ chấp nhận POST' });
+
+  if (checkRateLimit(req, 20)) { // 20 requests per hour for generate
+    return res.status(429).json({ error: 'Bạn đã tạo quá nhiều. Vui lòng thử lại sau.' });
+  }
 
   let body;
   try {

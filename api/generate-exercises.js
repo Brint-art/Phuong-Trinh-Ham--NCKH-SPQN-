@@ -6,24 +6,30 @@
    ============================================================ */
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
-const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-2603';
+const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'ministral-14b-latest';
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
+const { checkRateLimit, applyCors } = require('./_lib');
 
-/* Giới hạn đơn giản (trong bộ nhớ, mỗi instance serverless một bộ đếm riêng).
-   Giai đoạn sau sẽ chuyển sang đếm theo tài khoản trong Supabase. */
-const RATE_LIMIT_MAX = 20;          // số yêu cầu tối đa trong cửa sổ
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 giờ
-const requestLog = [];
 
-function isRateLimited() {
-  const now = Date.now();
-  while (requestLog.length && now - requestLog[0] > RATE_LIMIT_WINDOW_MS) requestLog.shift();
-  if (requestLog.length >= RATE_LIMIT_MAX) return true;
-  requestLog.push(now);
-  return false;
-}
 
 const DIFFICULTY_LABEL = { 1: 'cơ bản', 2: 'vận dụng', 3: 'nâng cao' };
+
+/* Đọc body JSON tương thích mọi môi trường:
+   - Vercel: req.body đã được parse sẵn thành object.
+   - server.js local: req.body là chuỗi thô.
+   - Runtime chưa parse: tự đọc stream của req. */
+async function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body);
+  const raw = await new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', c => { data += c; if (data.length > 1e6) req.destroy(); });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+  if (!raw.trim()) throw new Error('empty body');
+  return JSON.parse(raw);
+}
 
 function buildPrompt({ topic, technique, difficulty, count }) {
   return [
@@ -34,8 +40,13 @@ function buildPrompt({ topic, technique, difficulty, count }) {
     'Yêu cầu:',
     '- Đề bài viết bằng LaTeX (dùng $...$ cho công thức).',
     '- Mỗi bài có gợi ý ngắn và lời giải theo từng bước rõ ràng.',
+    '- Định dạng chuỗi (bắt buộc):',
+    '+ title/problem/hint phải nằm trên ĐÚNG MỘT dòng, xuống dòng phải viết thành \\n.',
+    '+ solutionSteps là MẢNG CHUỖI (không phải mảng object), mỗi bước tối đa 2 câu.',
+    '+ không dùng $$, không dùng danh sách gạch đầu dòng bên trong chuỗi.',
     '- Trả về ĐÚNG định dạng JSON, không thêm văn bản nào khác:',
-    '{"exercises":[{"title":"...","problem":"...","hint":"...","solutionSteps":["Bước 1","Bước 2"]}]}'
+    '{"exercises":[{"title":"...","problem":"...","hint":"...","solutionSteps":["Bước 1","Bước 2"]}]}',
+    '+ Quy tắc escape JSON: mỗi dấu \\ trong LaTeX phải ghi thành hai dấu \\ liên tiếp.'
   ].join('\n');
 }
 
@@ -48,23 +59,47 @@ function isValidPayload(data) {
     );
 }
 
+/* Model nhỏ hay bọc JSON trong fence Markdown (```json ... ```) hoặc chèn thêm
+   văn bản thừa → bỏ fence, nếu vẫn hỏng thì lấy khối {...} lớn nhất. */
+function extractJson(text) {
+  const cleaned = String(text || '').trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1');
+  try { return JSON.parse(cleaned); } catch { /* xuống bước sau */ }
+  const a = cleaned.indexOf('{');
+  const b = cleaned.lastIndexOf('}');
+  if (a >= 0 && b > a) {
+    try { return JSON.parse(cleaned.slice(a, b + 1)); } catch { /* hết cách */ }
+  }
+  return null;
+}
+
+/* JSON "ăn" mất dấu gạch chéo của LaTeX: model ghi "\mathbb" (1 dấu \) thì
+   JSON.parse biến \math thành ký tự backspace + "mathbb", "\to" thành tab + "o"
+   → MathJax báo "Math input error". Phục hồi lại các ký tự điều khiển này. */
+function repairLatex(s) {
+  return String(s || '')
+    .replace(/\x08/g, '\\b')
+    .replace(/\x0c/g, '\\f')
+    .replace(/\t/g, '\\t')
+    .replace(/\r/g, '\\r');
+}
+
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (applyCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Chỉ chấp nhận POST' });
 
-  if (isRateLimited()) {
-    return res.status(429).json({ error: 'Bạn tạo bài quá nhiều. Vui lòng thử lại sau 1 giờ.' });
+  if (checkRateLimit(req, 20)) { // 20 requests per hour for generate
+    return res.status(429).json({ error: 'Bạn đã tạo quá nhiều. Vui lòng thử lại sau.' });
   }
+
+
 
   let body;
   try {
-    body = JSON.parse(req.body || '');
+    body = await readJsonBody(req);
   } catch {
     return res.status(400).json({ error: 'Dữ liệu gửi lên không hợp lệ' });
   }
+  if (!body || typeof body !== 'object') body = {};
 
   const topic = String(body.topic || '').slice(0, 200);
   const technique = String(body.technique || '').slice(0, 100);
@@ -95,6 +130,8 @@ module.exports = async function handler(req, res) {
           { role: 'user', content: buildPrompt({ topic, technique, difficulty, count }) }
         ],
         temperature: 0.7,
+        /* Ép Mistral trả JSON hợp lệ — nếu không model hay bọc ```json hoặc
+           nhét ký tự xuống dòng thô vào chuỗi làm JSON.parse thất bại. */
         response_format: { type: 'json_object' }
       })
     });
@@ -103,20 +140,31 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({ error: 'Mistral API đạt giới hạn quota (429). Hãy kiểm tra billing/quota của tài khoản Mistral.' });
     }
     if (!aiRes.ok) {
-      return res.status(502).json({ error: `Mistral API lỗi ${aiRes.status}` });
+      const detail = await aiRes.text().catch(() => '');
+      return res.status(502).json({ error: `Mistral API lỗi ${aiRes.status} (model: ${MISTRAL_MODEL}). ${detail.slice(0, 300)}` });
     }
 
     const aiData = await aiRes.json();
     const content = aiData.choices?.[0]?.message?.content || '';
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
+    const parsed = extractJson(content);
+    if (!parsed) {
       return res.status(502).json({ error: 'AI trả về JSON không hợp lệ' });
     }
     if (!isValidPayload(parsed)) {
       return res.status(502).json({ error: 'AI trả về cấu trúc không đúng (thiếu trường exercises/problem/solutionSteps)' });
     }
+
+    /* Chuẩn hóa: có model trả solutionSteps là mảng object {step, content} */
+    parsed.exercises = parsed.exercises
+      .slice(0, count)   /* model hay trả nhiều hơn số bài yêu cầu */
+      .map(ex => ({
+      ...ex,
+      title: repairLatex(ex.title),
+      problem: repairLatex(ex.problem),
+      hint: repairLatex(ex.hint),
+      solutionSteps: (ex.solutionSteps || []).map(s =>
+        repairLatex(typeof s === 'string' ? s : String(s?.content ?? s?.step ?? JSON.stringify(s))))
+    }));
 
     /* Giai đoạn 2: lưu vào bảng ai_generation_requests trong Supabase.
        Các trường đã có sẵn trong schema: requested_by, topic_id, technique,

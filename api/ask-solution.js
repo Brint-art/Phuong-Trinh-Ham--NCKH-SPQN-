@@ -5,38 +5,43 @@
    ============================================================ */
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
-const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-2603';
+const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'ministral-14b-latest';
 const MISTRAL_ENDPOINT = 'https://api.mistral.ai/v1/chat/completions';
 
-const RATE_LIMIT_MAX = 60;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const requestLog = [];
+const { checkRateLimit, applyCors } = require('./_lib');
 
-function isRateLimited() {
-  const now = Date.now();
-  while (requestLog.length && now - requestLog[0] > RATE_LIMIT_WINDOW_MS) requestLog.shift();
-  if (requestLog.length >= RATE_LIMIT_MAX) return true;
-  requestLog.push(now);
-  return false;
+/* Đọc body JSON tương thích mọi môi trường:
+   - Vercel: req.body đã được parse sẵn thành object.
+   - server.js local: req.body là chuỗi thô.
+   - Runtime chưa parse: tự đọc stream của req. */
+async function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string' && req.body.trim()) return JSON.parse(req.body);
+  const raw = await new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', c => { data += c; if (data.length > 1e6) req.destroy(); });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+  if (!raw.trim()) throw new Error('empty body');
+  return JSON.parse(raw);
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (applyCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Chỉ chấp nhận POST' });
 
-  if (isRateLimited()) {
+  if (checkRateLimit(req)) {
     return res.status(429).json({ error: 'Bạn hỏi quá nhiều. Vui lòng thử lại sau 1 giờ.' });
   }
 
   let body;
   try {
-    body = JSON.parse(req.body || '');
+    body = await readJsonBody(req);
   } catch {
     return res.status(400).json({ error: 'Dữ liệu gửi lên không hợp lệ' });
   }
+  if (!body || typeof body !== 'object') body = {};
 
   const problem = String(body.problem || '').slice(0, 4000);
   const solutionSteps = Array.isArray(body.solutionSteps)
@@ -102,7 +107,8 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({ error: 'Mistral API đạt giới hạn quota (429). Hãy kiểm tra billing/quota của tài khoản Mistral.' });
     }
     if (!aiRes.ok) {
-      return res.status(502).json({ error: `Mistral API lỗi ${aiRes.status}` });
+      const detail = await aiRes.text().catch(() => '');
+      return res.status(502).json({ error: `Mistral API lỗi ${aiRes.status} (model: ${MISTRAL_MODEL}). ${detail.slice(0, 300)}` });
     }
 
     const aiData = await aiRes.json();
