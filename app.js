@@ -874,7 +874,9 @@ async function init() {
     
     client.auth.onAuthStateChange(async (event, session) => {
       await updateAuthState(session);
-      loadData();
+      await loadData();
+      const hashPage = (location.hash || '').replace('#', '');
+      navigate(PAGES[hashPage] ? hashPage : 'home');
     });
   }
 
