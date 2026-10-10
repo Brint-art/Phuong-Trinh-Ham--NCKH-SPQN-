@@ -500,6 +500,9 @@ function renderAdminLists() {
     lessonList.innerHTML = '<h3>Danh sách Lý thuyết</h3>' + LESSONS.map(l => `
       <div style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
         <strong>${escapeHtml(l.title)}</strong> (Slug: ${escapeHtml(l.slug)})
+        <span style="font-size:0.8em; padding:2px 6px; border-radius:4px; margin-left:8px; background: ${l.is_published ? '#d1fae5' : '#fef3c7'}; color: ${l.is_published ? '#065f46' : '#92400e'}">
+          ${l.is_published ? 'Đã xuất bản' : 'Bản nháp'}
+        </span>
         <div style="margin-top: 10px;">
           <button class="btn btn-primary btn-edit-lesson" data-id="${l.id}" style="padding: 4px 8px; font-size: 0.9em;">Sửa</button>
           <button class="btn btn-outline btn-delete-lesson" data-id="${l.id}" style="padding: 4px 8px; font-size: 0.9em; color: red; border-color: red;">Xóa</button>
@@ -515,6 +518,9 @@ function renderAdminLists() {
       return `
       <div style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
         <strong>Bài thuộc: ${escapeHtml(lessonTitle)}</strong>
+        <span style="font-size:0.8em; padding:2px 6px; border-radius:4px; margin-left:8px; background: ${e.is_published ? '#d1fae5' : '#fef3c7'}; color: ${e.is_published ? '#065f46' : '#92400e'}">
+          ${e.is_published ? 'Đã xuất bản' : 'Bản nháp'}
+        </span>
         <p>${escapeHtml(e.question || '').substring(0, 100)}...</p>
         <div style="margin-top: 10px;">
           <button class="btn btn-primary btn-edit-exercise" data-id="${e.id}" style="padding: 4px 8px; font-size: 0.9em;">Sửa</button>
@@ -536,11 +542,12 @@ document.addEventListener('click', async e => {
     $('#admin-lesson-supplementary').value = l.supplementary_knowledge || '';
     $('#admin-lesson-foundational').value = l.foundational_knowledge || '';
     $('#admin-lesson-characteristic').value = l.characteristic_exercises || '';
+    $('#admin-lesson-published').checked = !!l.is_published;
     $('#admin-lesson-title').focus();
   }
   
   if (e.target.matches('.btn-delete-lesson')) {
-    if (confirm('Bạn có chắc muốn xóa bài học này?')) {
+    if (confirm('Bạn có chắc muốn xóa bài học này? Mọi bài tập của bài học cũng sẽ bị xóa vĩnh viễn!')) {
       const client = sb();
       await client.from('lessons').delete().eq('id', e.target.dataset.id);
       await loadData();
@@ -556,6 +563,7 @@ document.addEventListener('click', async e => {
     $('#admin-exercise-tags').value = (ex.tags || []).join(', ');
     $('#admin-exercise-question').value = ex.question || '';
     $('#admin-exercise-solution').value = ex.detailed_solution || '';
+    $('#admin-exercise-published').checked = !!ex.is_published;
     $('#admin-exercise-question').focus();
   }
   
@@ -572,11 +580,13 @@ document.addEventListener('click', async e => {
 $('#admin-lesson-clear')?.addEventListener('click', () => {
   $('#admin-lesson-form').reset();
   $('#admin-lesson-id').value = '';
+  $('#admin-lesson-published').checked = false;
 });
 
 $('#admin-exercise-clear')?.addEventListener('click', () => {
   $('#admin-exercise-form').reset();
   $('#admin-exercise-id').value = '';
+  $('#admin-exercise-published').checked = false;
 });
 
 $('#admin-lesson-form')?.addEventListener('submit', async (e) => {
@@ -588,7 +598,8 @@ $('#admin-lesson-form')?.addEventListener('submit', async (e) => {
     slug: $('#admin-lesson-slug').value,
     supplementary_knowledge: $('#admin-lesson-supplementary').value,
     foundational_knowledge: $('#admin-lesson-foundational').value,
-    characteristic_exercises: $('#admin-lesson-characteristic').value
+    characteristic_exercises: $('#admin-lesson-characteristic').value,
+    is_published: $('#admin-lesson-published').checked
   };
   const client = sb();
   
@@ -613,7 +624,8 @@ $('#admin-exercise-form')?.addEventListener('submit', async (e) => {
     lesson_id: $('#admin-exercise-lesson').value,
     tags: $('#admin-exercise-tags').value.split(',').map(s=>s.trim()).filter(Boolean),
     question: $('#admin-exercise-question').value,
-    detailed_solution: $('#admin-exercise-solution').value
+    detailed_solution: $('#admin-exercise-solution').value,
+    is_published: $('#admin-exercise-published').checked
   };
   const client = sb();
   
@@ -716,20 +728,20 @@ function setupAuthModal() {
   
   $('#auth-close').addEventListener('click', () => modal.classList.add('hidden'));
   
-  $('#mode-login').addEventListener('click', e => {
+  $('#mode-login').addEventListener('click', () => {
     isLogin = true;
-    e.target.classList.add('active');
+    $('#mode-login').classList.add('active');
     $('#mode-signup').classList.remove('active');
     nameLabel.style.display = 'none';
     $('#auth-submit').textContent = 'Đăng nhập';
     msg.textContent = '';
   });
   
-  $('#mode-signup').addEventListener('click', e => {
+  $('#mode-signup').addEventListener('click', () => {
     isLogin = false;
-    e.target.classList.add('active');
+    $('#mode-signup').classList.add('active');
     $('#mode-login').classList.remove('active');
-    nameLabel.style.display = 'block';
+    nameLabel.style.display = 'flex';
     $('#auth-submit').textContent = 'Đăng ký';
     msg.textContent = '';
   });
@@ -743,31 +755,42 @@ function setupAuthModal() {
     const name = $('#auth-name').value;
     const client = sb();
     
+    if (!client) {
+      msg.textContent = 'Lỗi kết nối máy chủ Supabase.';
+      msg.style.color = 'red';
+      return;
+    }
+    
     msg.textContent = 'Đang xử lý...';
     msg.style.color = 'var(--text-color)';
     
-    if (isLogin) {
-      const { error } = await client.auth.signInWithPassword({ email, password });
-      if (error) {
-        msg.textContent = 'Lỗi đăng nhập: ' + (error.message.includes('Invalid login') ? 'Sai email hoặc mật khẩu' : error.message);
-        msg.style.color = 'red';
+    try {
+      if (isLogin) {
+        const { error } = await client.auth.signInWithPassword({ email, password });
+        if (error) {
+          msg.textContent = 'Lỗi đăng nhập: ' + (error.message.includes('Invalid login') ? 'Sai email hoặc mật khẩu' : error.message);
+          msg.style.color = 'red';
+        } else {
+          modal.classList.add('hidden');
+          form.reset();
+        }
       } else {
-        modal.classList.add('hidden');
-        form.reset();
+        const { error } = await client.auth.signUp({
+          email, password,
+          options: { data: { name } }
+        });
+        if (error) {
+          msg.textContent = 'Lỗi đăng ký: ' + error.message;
+          msg.style.color = 'red';
+        } else {
+          msg.textContent = 'Đăng ký thành công! Bạn có thể đăng nhập ngay.';
+          msg.style.color = 'green';
+          form.reset();
+        }
       }
-    } else {
-      const { error } = await client.auth.signUp({
-        email, password,
-        options: { data: { name } }
-      });
-      if (error) {
-        msg.textContent = 'Lỗi đăng ký: ' + error.message;
-        msg.style.color = 'red';
-      } else {
-        msg.textContent = 'Đăng ký thành công! Bạn có thể đăng nhập ngay.';
-        msg.style.color = 'green';
-        form.reset();
-      }
+    } catch (err) {
+      msg.textContent = 'Lỗi: ' + err.message;
+      msg.style.color = 'red';
     }
   });
 }
