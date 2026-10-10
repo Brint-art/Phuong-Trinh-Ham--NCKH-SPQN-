@@ -22,15 +22,43 @@ function escapeHtml(s) {
 
 function toHtml(text) {
   if (!text) return '';
-  return text.split('\n').map(part => part.trim()).filter(Boolean)
-    .map(part => {
-      let escaped = escapeHtml(part);
-      if (escaped.startsWith('### ')) {
-        return `<h4>${escaped.substring(4)}</h4>`;
-      }
-      return `<p>${escaped}</p>`;
-    })
-    .join('');
+  
+  // 1. Escape HTML first to prevent XSS
+  let html = escapeHtml(text);
+  
+  // 2. Parse Markdown
+  // Bold
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // Italic (using _ or *) - only if surrounded by spaces or word boundaries to avoid math issues
+  html = html.replace(/(?:^|\s)\*(.*?)\*(?=\s|$)/g, ' <em>$1</em>');
+  html = html.replace(/(?:^|\s)_(.*?)_(?=\s|$)/g, ' <em>$1</em>');
+  
+  // 3. Process block level (paragraphs, lists, headers)
+  let inList = false;
+  let lines = html.split('\n').map(part => part.trim());
+  let processedLines = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    if (!line) {
+      if (inList) { processedLines.push('</ul>'); inList = false; }
+      continue;
+    }
+    
+    if (line.startsWith('### ')) {
+      if (inList) { processedLines.push('</ul>'); inList = false; }
+      processedLines.push(`<h4>${line.substring(4)}</h4>`);
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      if (!inList) { processedLines.push('<ul>'); inList = true; }
+      processedLines.push(`<li>${line.substring(2)}</li>`);
+    } else {
+      if (inList) { processedLines.push('</ul>'); inList = false; }
+      processedLines.push(`<p>${line}</p>`);
+    }
+  }
+  if (inList) { processedLines.push('</ul>'); }
+  
+  return processedLines.join('');
 }
 
 function typeset(root) {
